@@ -8,12 +8,30 @@
   <a href='https://ko-fi.com/W3V222VPDT' target='_blank'><img height='36' style='border:0px;height:36px;' src='https://storage.ko-fi.com/cdn/kofi6.png?v=6' border='0' alt='Buy Me a Coffee at ko-fi.com' /></a>
 </p>
 
-This is a fork of [MeshCore](https://github.com/meshcore-dev/MeshCore) that adds
-**mishmesh**, a standalone user interface. MeshCore's companion
-firmware normally leans on a paired phone for most things; mishmesh
-puts messaging, contacts, and configuration on the device, so the radio is
-useful on its own and the phone is optional. It can currently do almost everything
-without a phone.
+This project combines [MeshCore mishmesh](https://github.com/burakcan/MeshCore-mishmesh)
+with ideas and features from
+[MeshCore-child-companion](https://github.com/burakcan/MeshCore-child-companion)
+to make a child-friendly pager that can still be used as a standalone MeshCore
+device. mishmesh provides the on-device messaging interface, contacts, keypad,
+and settings; the child-companion inspired additions focus on simple
+parent-to-child communication.
+
+### Child pager changes
+
+- **Parent controls:** a PIN-protected allowlist controls who can message the
+  child. Unknown contacts and public channels are blocked while restrictions
+  are enabled.
+- **Questions:** send a prompt such as `?Dinner | Pizza | Pasta`; the child
+  chooses an answer and it is sent back to you.
+- **Call bell:** send one `🔔` to ring the pager and show that Dad is calling.
+  The child can reply with `👋 here` from a key press.
+- **Delivery:** unsent direct messages retry automatically while the route is
+  unavailable.
+- **Emoji:** a lightweight monochrome pixel icon set renders the bell and wave
+  symbols on the small display.
+
+See [child pager setup and behavior](docs/child-pager.md). Messaging starts
+restricted; configure **Apps → Parent controls** before use.
 
 It targets the Seeed Wio Tracker L1 / L1 Pro (128x64 OLED), the Wio Tracker
 L1 E-Ink (2.13", 250x122), which also gets portrait orientation, a larger
@@ -97,7 +115,7 @@ A PlatformIO project. With the repo cloned:
 
 ```sh
 export FIRMWARE_VERSION=mishmesh-dev
-pio run -e WioTrackerL1_companion_radio_usb_mishmesh -t upload   # or _ble_mishmesh
+pio run -e WioTrackerL1_companion_radio_usb_mishmesh-child -t upload   # or _ble_mishmesh-child
 ```
 
 On the e-ink board swap `WioTrackerL1_` for `WioTrackerL1Eink_` in the env name,
@@ -107,7 +125,7 @@ Package the `.uf2` / `.zip` like a release does (lands in `out/`):
 
 ```sh
 export FIRMWARE_VERSION=mishmesh-dev
-sh build.sh build-firmware WioTrackerL1_companion_radio_usb_mishmesh
+FIRMWARE_VERSION=v1.7.0c sh build.sh build-firmware WioTrackerL1_companion_radio_ble_mishmesh-child
 ```
 
 ### Emoji

@@ -40,4 +40,12 @@ public:
 
   virtual void notify(UIEventType t = UIEventType::none) = 0;
   virtual void loop() = 0;
+  virtual void onCallBell(const uint8_t* key, const char* name, uint32_t timestamp) {}
+  // [mishmesh] Result of a room/repeater login initiated on-device (mishmesh).
+  // Default no-op keeps the companion/legacy UIs unaffected. `perms` are the
+  // server's ACL permission bits (0 = guest/read-only).
+  virtual void onRoomLogin(const uint8_t* pubkey, bool success, bool is_admin, uint8_t perms) {
+    (void)pubkey; (void)success; (void)is_admin; (void)perms;
+  }
+  // [/mishmesh]
 };

@@ -1,0 +1,423 @@
+[
+  {
+    "name": "bell",
+    "file": "bell.svg",
+    "codepoints": [
+      "1F514"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "wave",
+    "file": "thumb-up.svg",
+    "codepoints": [
+      "1F44B"
+    ],
+    "rows": [
+      "...#.#...",
+      ".#.#.#.#.",
+      ".#.#.#.#.",
+      ".#.###.#.",
+      "..#####..",
+      "##.####..",
+      ".######..",
+      "..####...",
+      "..####..."
+    ]
+  },
+  {
+    "name": "thumb-up",
+    "file": "thumb-up.svg",
+    "codepoints": [
+      "1F44D"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "thumb-down",
+    "file": "thumb-down.svg",
+    "codepoints": [
+      "1F44E"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "heart",
+    "file": "heart.svg",
+    "codepoints": [
+      "2764",
+      "2665",
+      "1F49B",
+      "1F49A",
+      "1F499",
+      "1F49C",
+      "1F5A4",
+      "1F90D",
+      "1F90E",
+      "1F9E1"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "star",
+    "file": "star.svg",
+    "codepoints": [
+      "2B50",
+      "1F31F"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "pizza-slice",
+    "file": "pizza-slice.svg",
+    "codepoints": [
+      "1F355"
+    ],
+    "knockout": [
+      "#C10015",
+      "#00AF3E"
+    ]
+  },
+  {
+    "name": "noodles",
+    "file": "noodles.svg",
+    "codepoints": [
+      "1F35C",
+      "1F35D"
+    ],
+    "knockout": [
+      "#FFB100"
+    ]
+  },
+  {
+    "name": "burger",
+    "file": "burger.svg",
+    "codepoints": [
+      "1F354"
+    ],
+    "knockout": [
+      "#805000"
+    ]
+  },
+  {
+    "name": "fries",
+    "file": "fries.svg",
+    "codepoints": [
+      "1F35F"
+    ],
+    "knockout": [
+      "#FFE800"
+    ]
+  },
+  {
+    "name": "sandwich",
+    "file": "sandwich.svg",
+    "codepoints": [
+      "1F96A"
+    ],
+    "knockout": [
+      "#FFE800"
+    ]
+  },
+  {
+    "name": "rice",
+    "file": "rice.svg",
+    "codepoints": [
+      "1F35A"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "apple",
+    "file": "apple.svg",
+    "codepoints": [
+      "1F34E",
+      "1F34F"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "banana",
+    "file": "banana.svg",
+    "codepoints": [
+      "1F34C"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "cherry",
+    "file": "cherry.svg",
+    "codepoints": [
+      "1F352"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "grapes",
+    "file": "grapes.svg",
+    "codepoints": [
+      "1F347"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "strawberry",
+    "file": "strawberry.svg",
+    "codepoints": [
+      "1F353"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "watermelon",
+    "file": "watermelon.svg",
+    "codepoints": [
+      "1F349"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "ice-cream",
+    "file": "ice-cream.svg",
+    "codepoints": [
+      "1F366"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "cookie",
+    "file": "cookie.svg",
+    "codepoints": [
+      "1F36A"
+    ],
+    "knockout": [
+      "#9C5F00"
+    ]
+  },
+  {
+    "name": "coffee",
+    "file": "coffee.svg",
+    "codepoints": [
+      "2615"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "house",
+    "file": "house.svg",
+    "codepoints": [
+      "1F3E0",
+      "1F3E1"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "car",
+    "file": "car.svg",
+    "codepoints": [
+      "1F697"
+    ],
+    "knockout": [
+      "#89CDFF"
+    ],
+    "keep_dark": true
+  },
+  {
+    "name": "bus",
+    "file": "bus.svg",
+    "codepoints": [
+      "1F68C"
+    ],
+    "knockout": [
+      "#89CDFF"
+    ],
+    "keep_dark": true
+  },
+  {
+    "name": "rocket",
+    "file": "rocket.svg",
+    "codepoints": [
+      "1F680"
+    ],
+    "knockout": [
+      "#89CDFF"
+    ]
+  },
+  {
+    "name": "cat",
+    "file": "cat.svg",
+    "codepoints": [
+      "1F408"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "dog",
+    "file": "dog.svg",
+    "codepoints": [
+      "1F415"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "fish",
+    "file": "fish.svg",
+    "codepoints": [
+      "1F41F"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "frog",
+    "file": "frog.svg",
+    "codepoints": [
+      "1F438"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "rabbit-grey",
+    "file": "rabbit-grey.svg",
+    "codepoints": [
+      "1F407"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "moon",
+    "file": "moon.svg",
+    "codepoints": [
+      "1F319"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "sun",
+    "file": "sun.svg",
+    "codepoints": [
+      "2600",
+      "1F31E"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "cloud",
+    "file": "cloud.svg",
+    "codepoints": [
+      "2601"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "rain",
+    "file": "rain.svg",
+    "codepoints": [
+      "1F327"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "snowman",
+    "file": "snowman.svg",
+    "codepoints": [
+      "2603",
+      "26C4"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "gift",
+    "file": "gift.svg",
+    "codepoints": [
+      "1F381"
+    ],
+    "knockout": [
+      "#FFB100"
+    ]
+  },
+  {
+    "name": "mail",
+    "file": "mail.svg",
+    "codepoints": [
+      "2709",
+      "1F4E7"
+    ],
+    "knockout": [
+      "#9C5F00"
+    ]
+  },
+  {
+    "name": "phone",
+    "file": "phone.svg",
+    "codepoints": [
+      "260E",
+      "1F4DE"
+    ],
+    "knockout": [
+      "#FFFFFF"
+    ]
+  },
+  {
+    "name": "clock",
+    "file": "clock.svg",
+    "codepoints": [
+      "1F552"
+    ],
+    "knockout": [
+      "#F92F3C"
+    ]
+  },
+  {
+    "name": "lock",
+    "file": "lock.svg",
+    "codepoints": [
+      "1F512"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "unlock",
+    "file": "unlock.svg",
+    "codepoints": [
+      "1F513"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "lightning-bolt-1",
+    "file": "lightning-bolt-1.svg",
+    "codepoints": [
+      "26A1"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "alert-triangle",
+    "file": "alert-triangle.svg",
+    "codepoints": [
+      "26A0"
+    ],
+    "knockout": []
+  },
+  {
+    "name": "book",
+    "file": "book.svg",
+    "codepoints": [
+      "1F4D5"
+    ],
+    "knockout": [
+      "#EBEAF7"
+    ]
+  },
+  {
+    "name": "pencil",
+    "file": "pencil.svg",
+    "codepoints": [
+      "270F"
+    ],
+    "knockout": [
+      "#FFE800"
+    ],
+    "keep_dark": true
+  }
+]

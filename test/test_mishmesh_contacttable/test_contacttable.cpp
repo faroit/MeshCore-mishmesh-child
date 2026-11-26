@@ -45,22 +45,33 @@ public:
 // these tests only exercise the contact table.
 class TestMesh : public BaseChatMesh {
 public:
+  bool restricted = false;
+  int messages = 0, groups = 0, signedMessages = 0, requests = 0, responses = 0;
+  bool isContactAllowed(const ContactInfo& c) const override { return !restricted || c.id.pub_key[31] == 1; }
+  bool areChannelsAllowed() const override { return !restricted; }
+  bool areRoomMessagesAllowed() const override { return !restricted; }
+  using BaseChatMesh::searchPeersByHash;
+  using BaseChatMesh::searchChannelsByHash;
+  using BaseChatMesh::onPeerDataRecv;
+  using BaseChatMesh::onPeerPathRecv;
+  using BaseChatMesh::onGroupDataRecv;
+
   TestMesh(mesh::Radio& r, mesh::MillisecondClock& m, mesh::RNG& g, mesh::RTCClock& c,
            mesh::PacketManager& p, mesh::MeshTables& t) : BaseChatMesh(r, m, g, c, p, t) { }
 
   void onDiscoveredContact(ContactInfo&, bool, uint8_t, const uint8_t*) override { }
   ContactInfo* processAck(const uint8_t*) override { return nullptr; }
   void onContactPathUpdated(const ContactInfo&) override { }
-  void onMessageRecv(const ContactInfo&, mesh::Packet*, uint32_t, const char*) override { }
+  void onMessageRecv(const ContactInfo&, mesh::Packet*, uint32_t, const char*) override { ++messages; }
   void onCommandDataRecv(const ContactInfo&, mesh::Packet*, uint32_t, const char*) override { }
   void onCLICommandRecv(const ContactInfo&, mesh::Packet*, uint32_t, const char*, char*) override { }
-  void onSignedMessageRecv(const ContactInfo&, mesh::Packet*, uint32_t, const uint8_t*, const char*) override { }
+  void onSignedMessageRecv(const ContactInfo&, mesh::Packet*, uint32_t, const uint8_t*, const char*) override { ++signedMessages; }
   uint32_t calcFloodTimeoutMillisFor(uint32_t) const override { return 0; }
   uint32_t calcDirectTimeoutMillisFor(uint32_t, uint8_t) const override { return 0; }
   void onSendTimeout() override { }
-  void onChannelMessageRecv(const mesh::GroupChannel&, mesh::Packet*, uint32_t, const char*) override { }
-  uint8_t onContactRequest(const ContactInfo&, uint32_t, const uint8_t*, uint8_t, uint8_t*) override { return 0; }
-  void onContactResponse(const ContactInfo&, const uint8_t*, uint8_t) override { }
+  void onChannelMessageRecv(const mesh::GroupChannel&, mesh::Packet*, uint32_t, const char*) override { ++groups; }
+  uint8_t onContactRequest(const ContactInfo&, uint32_t, const uint8_t*, uint8_t, uint8_t*) override { ++requests; return 0; }
+  void onContactResponse(const ContactInfo&, const uint8_t*, uint8_t) override { ++responses; }
 };
 
 struct Fixture {
@@ -176,6 +187,81 @@ TEST(ContactTable, LookupByPubKeyFindsAnExistingContact) {
 
   memset(key, 9, sizeof(key));   // never added
   EXPECT_EQ(nullptr, f.mesh.lookupContactByPubKey(key, 6));
+}
+
+
+TEST(MessageAccess, RejectsOutboundMessagesCommandsAndRequestsBeforeQueueing) {
+  Fixture f; f.add("Blocked", ADV_TYPE_CHAT, 2); f.mesh.restricted = true;
+  const ContactInfo& c = *f.mesh.getContactPtrByIdx(0);
+  uint32_t ack = 0, timeout = 0, tag = 0; uint8_t data[1] = {1};
+  EXPECT_EQ(MSG_SEND_FAILED, f.mesh.sendMessage(c, 1, 0, "hello", ack, timeout));
+  EXPECT_EQ(MSG_SEND_FAILED, f.mesh.sendCommandData(c, 1, 0, "hello", timeout));
+  EXPECT_EQ(MSG_SEND_FAILED, f.mesh.sendLogin(c, "pw", timeout));
+  EXPECT_EQ(MSG_SEND_FAILED, f.mesh.sendAnonReq(c, data, 1, tag, timeout));
+  EXPECT_EQ(MSG_SEND_FAILED, f.mesh.sendRequest(c, data, 1, tag, timeout));
+  EXPECT_EQ(MSG_SEND_FAILED, f.mesh.sendRequest(c, 1, tag, timeout));
+  EXPECT_EQ(0, f.mgr.getOutboundTotal());
+}
+TEST(MessageAccess, AllowedContactStillSends) {
+  Fixture f; f.add("Allowed", ADV_TYPE_CHAT, 1); f.mesh.restricted = true;
+  uint32_t ack = 0, timeout = 0;
+  EXPECT_EQ(MSG_SEND_SENT_FLOOD, f.mesh.sendMessage(*f.mesh.getContactPtrByIdx(0), 1, 0, "hello", ack, timeout));
+  EXPECT_EQ(1, f.mgr.getOutboundTotal());
+}
+TEST(MessageAccess, DeniedPeerIsNotADecryptionCandidateAndRecheckedBeforeDelivery) {
+  Fixture f; f.add("Blocked", ADV_TYPE_CHAT, 2);
+  uint8_t hash[1] = {2}, secret[32] = {}, data[32] = {1,0,0,0,0,'h','i',0};
+  ASSERT_EQ(1, f.mesh.searchPeersByHash(hash));
+  f.mesh.restricted = true;
+  mesh::Packet p{};
+  f.mesh.onPeerDataRecv(&p, PAYLOAD_TYPE_TXT_MSG, 0, secret, data, 8);
+  f.mesh.onPeerDataRecv(&p, PAYLOAD_TYPE_REQ, 0, secret, data, 8);
+  f.mesh.onPeerDataRecv(&p, PAYLOAD_TYPE_RESPONSE, 0, secret, data, 8);
+  EXPECT_FALSE(f.mesh.onPeerPathRecv(&p, 0, secret, data, 0, PAYLOAD_TYPE_RESPONSE, data, 8));
+  EXPECT_EQ(0, f.mesh.messages); EXPECT_EQ(0, f.mesh.requests); EXPECT_EQ(0, f.mesh.responses);
+  EXPECT_EQ(0, f.mgr.getOutboundTotal());
+  EXPECT_EQ(0, f.mesh.searchPeersByHash(hash));
+}
+TEST(MessageAccess, AllowedPeerReceivesButRoomForwardedMessagesAreDropped) {
+  Fixture f; f.add("Allowed", ADV_TYPE_CHAT, 1); f.mesh.restricted = true;
+  uint8_t hash[1] = {1}, secret[32] = {}, data[32] = {1,0,0,0,0,'h','i',0};
+  ASSERT_EQ(1, f.mesh.searchPeersByHash(hash));
+  mesh::Packet p{};
+  f.mesh.onPeerDataRecv(&p, PAYLOAD_TYPE_TXT_MSG, 0, secret, data, 8);
+  EXPECT_EQ(1, f.mesh.messages);
+  data[4] = TXT_TYPE_SIGNED_PLAIN << 2;
+  f.mesh.onPeerDataRecv(&p, PAYLOAD_TYPE_TXT_MSG, 0, secret, data, 16);
+  EXPECT_EQ(0, f.mesh.signedMessages);
+}
+TEST(MessageAccess, ExistingAndNewChannelsCannotSendReceiveOrExposeKeys) {
+  Fixture f;
+  ChannelDetails cd{}; memset(cd.channel.secret, 1, 16);
+  ASSERT_TRUE(f.mesh.setChannel(0, cd));
+  ASSERT_TRUE(f.mesh.getChannel(0, cd));
+  mesh::GroupChannel matches[4];
+  ASSERT_GT(f.mesh.searchChannelsByHash(cd.channel.hash, matches, 4), 0);
+  f.mesh.restricted = true;
+  EXPECT_EQ(0, f.mesh.searchChannelsByHash(cd.channel.hash, matches, 4));
+  EXPECT_FALSE(f.mesh.getChannel(0, cd));
+  EXPECT_FALSE(f.mesh.setChannel(1, cd));
+  EXPECT_EQ(nullptr, f.mesh.addChannel("Public", "izOH6cXN6mrJ5e26oRXNcg=="));
+  EXPECT_FALSE(f.mesh.sendGroupMessage(1, cd.channel, "Me", "hello", 5));
+  uint8_t data[32] = {1,0,0,0,0,'h','i',0};
+  EXPECT_FALSE(f.mesh.sendGroupData(cd.channel, nullptr, OUT_PATH_UNKNOWN, 1, data, 1));
+  mesh::Packet p{};
+  f.mesh.onGroupDataRecv(&p, PAYLOAD_TYPE_GRP_TXT, cd.channel, data, 8);
+  EXPECT_EQ(0, f.mesh.groups); EXPECT_EQ(0, f.mgr.getOutboundTotal());
+  // Disabling parent controls restores the retained channel, without rejoining.
+  f.mesh.restricted = false;
+  EXPECT_TRUE(f.mesh.getChannel(0, cd));
+}
+
+TEST(MessageAccess, FullLengthMessageSupportsExtendedRetries) {
+  Fixture f; f.add("Allowed", ADV_TYPE_CHAT, 1); f.mesh.restricted = true;
+  auto* contact = f.mesh.getContactPtrByIdx(0);
+  char text[161]; memset(text, 'x', 160); text[160] = 0;
+  uint32_t ack = 0, timeout = 0;
+  EXPECT_NE(MSG_SEND_FAILED, f.mesh.sendMessage(*contact, 123, 255, text, ack, timeout));
 }
 
 int main(int argc, char** argv) {

@@ -15,6 +15,8 @@ static Canvas::EmojiZeroWidthFn s_emojiZeroWidth = nullptr;
 // against neighbouring glyphs. Applied identically in mm_char and textWidth.
 static constexpr int kEmojiPadPx = 1;
 
+bool Canvas::hasEmojiRenderer() { return s_emojiFont && s_emojiLookup; }
+
 void Canvas::setEmojiRenderer(const mf_font_s* font, EmojiLookupFn lookup,
                               EmojiZeroWidthFn zeroWidth) {
   s_emojiFont = font; s_emojiLookup = lookup; s_emojiZeroWidth = zeroWidth;

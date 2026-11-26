@@ -7,6 +7,7 @@ void RetryEngine::reset() {
   for (int i = 0; i < MAX_PENDING; i++) _e[i].used = false;
   _enabled = false;
   _resetPath = false;
+  _persistent = false;
 }
 
 int RetryEngine::find(const ConvoKey& key, uint32_t senderTime) const {
@@ -15,17 +16,21 @@ int RetryEngine::find(const ConvoKey& key, uint32_t senderTime) const {
   return -1;
 }
 
-void RetryEngine::track(const ConvoKey& key, uint32_t senderTime, uint32_t now) {
-  if (key.type != 0) return;                  // direct messages only
-  if (find(key, senderTime) >= 0) return;
+bool RetryEngine::track(const ConvoKey& key, uint32_t senderTime, uint32_t now, uint32_t baseTimeout) {
+  if (key.type != 0) return false;                  // direct messages only
+  if (find(key, senderTime) >= 0) return true;
   for (int j = 0; j < MAX_PENDING; j++) {
     if (!_e[j].used) {
       _e[j].used = true; _e[j].seen = true;
       _e[j].key = key; _e[j].senderTime = senderTime;
-      _e[j].attempts = 0; _e[j].dueAt = now + RETRY_INTERVAL_MS;
-      return;
+      _e[j].baseTimeout = baseTimeout < NUDGE_GAP_MS ? NUDGE_GAP_MS : baseTimeout;
+      _e[j].attempts = 0;
+      _e[j].dueAt = now + (_persistent ? backoff(0, _e[j].baseTimeout) : RETRY_INTERVAL_MS);
+      _e[j].lastSendAt = now; _e[j].forceFlood = false;
+      return true;
     }
   }
+  return false;
 }
 
 void RetryEngine::beginScan() {
@@ -54,15 +59,56 @@ void RetryEngine::endScan(uint32_t now, RetryActions& actions) {
     if (!_enabled) continue;                       // tracking only; no retries when off
     if ((int32_t)(now - e.dueAt) < 0) continue;    // not due yet (wrap-safe compare)
 
-    if (e.attempts >= MAX_RETRIES) {               // out of retries -> fail
+    if (!_persistent && e.attempts >= MAX_RETRIES) {               // out of retries -> fail
       actions.markFailed(e.key, e.senderTime);
       e.used = false;
       continue;
     }
-    e.attempts++;
-    bool reset = _resetPath && e.attempts == RESET_PATH_AFTER;
-    actions.retransmit(e.key, e.senderTime, e.attempts, reset);
-    e.dueAt = now + RETRY_INTERVAL_MS;
+    // Keep the original timestamp and vary the attempt byte. Cycle extended
+    // attempts rather than saturating at 255 and emitting identical packets.
+    uint8_t attempt = e.attempts == 255 ? 4 : e.attempts + 1;
+    bool reset = e.forceFlood || (_resetPath &&
+                 (_persistent ? attempt % RESET_PATH_AFTER == 0 : attempt == RESET_PATH_AFTER));
+    bool sent = actions.retransmit(e.key, e.senderTime, attempt, reset);
+    if (sent) { e.attempts = attempt; e.forceFlood = false; }
+    // A full packet pool does not consume an attempt. Also rate-limit failed
+    // enqueue attempts so continual RX cannot create a busy retry loop.
+    e.lastSendAt = now;
+    e.dueAt = now + (_persistent ? backoff(e.attempts, e.baseTimeout) : RETRY_INTERVAL_MS);
+  }
+}
+
+bool RetryEngine::due(uint32_t now) const {
+  if (!_enabled) return false;
+  for (const auto& e : _e) if (e.used && int32_t(now - e.dueAt) >= 0) return true;
+  return false;
+}
+void RetryEngine::acknowledged(const ConvoKey& key, uint32_t time) {
+  int i = find(key, time);
+  if (i >= 0) _e[i].used = false;
+}
+
+uint32_t RetryEngine::backoff(uint8_t attempt, uint32_t baseTimeout) {
+  uint32_t wait = baseTimeout < NUDGE_GAP_MS ? NUDGE_GAP_MS : baseTimeout;
+  if (wait >= BACKOFF_CAP_MS) return BACKOFF_CAP_MS;
+  while (attempt-- && wait < BACKOFF_CAP_MS) {
+    if (wait > BACKOFF_CAP_MS / 2) return BACKOFF_CAP_MS;
+    wait *= 2;
+  }
+  return wait > BACKOFF_CAP_MS ? BACKOFF_CAP_MS : wait;
+}
+
+void RetryEngine::onRadioActivity(uint32_t now) {
+  if (!_enabled || !_persistent) return;
+  for (auto& e : _e) if (e.used && uint32_t(now - e.lastSendAt) >= NUDGE_GAP_MS)
+    e.dueAt = now;
+}
+void RetryEngine::onRecipientHeard(const ConvoKey& key, uint32_t now) {
+  if (!_enabled || !_persistent) return;
+  for (auto& e : _e) if (e.used && e.key.equals(key)) {
+    e.forceFlood = true;
+    uint32_t earliest = e.lastSendAt + NUDGE_GAP_MS;
+    e.dueAt = int32_t(now - earliest) >= 0 ? now : earliest;
   }
 }
 

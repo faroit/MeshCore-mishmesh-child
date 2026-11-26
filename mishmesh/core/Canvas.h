@@ -156,6 +156,7 @@ public:
   typedef bool (*EmojiZeroWidthFn)(uint16_t key);
   static void setEmojiRenderer(const mf_font_s* font, EmojiLookupFn lookup,
                                EmojiZeroWidthFn zeroWidth);
+  static bool hasEmojiRenderer();
 };
 
 }  // namespace mishmesh

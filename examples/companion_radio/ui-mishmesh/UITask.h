@@ -140,8 +140,9 @@ class UITask : public AbstractUITask, public mishmesh::AppServices, public mishm
   // Auto-retry of undelivered direct messages. The engine decides what/when;
   // this glue performs the radio re-transmit (via MyMesh) and the failed-flag.
   struct RetryGlue : public mishmesh::RetryActions {
+    mishmesh::MessagesService* messages = nullptr;
     mishmesh::MessageStore* store = nullptr;
-    void retransmit(const mishmesh::ConvoKey& k, uint32_t senderTime,
+    bool retransmit(const mishmesh::ConvoKey& k, uint32_t senderTime,
                     uint8_t attempt, bool resetPath) override;
     void markFailed(const mishmesh::ConvoKey& k, uint32_t senderTime) override;
   } _retryGlue;
@@ -214,6 +215,7 @@ public:
   uint32_t epochSeconds() const override;
   bool systemStats(mishmesh::SystemStats& out) const override;
   bool airtimeStats(mishmesh::AirtimeStats& out) const override;
+  MessageAccessPolicy* messageAccess() override { return &the_mesh.messageAccess(); }
   void factoryReset(bool keepIdentity) override { the_mesh.uiFactoryReset(keepIdentity); }
   void selfPublicKeyHex(char* out, size_t cap, int bytes) const override {
     if (!out || !cap) return;
@@ -549,6 +551,7 @@ public:
   void notify(UIEventType t = UIEventType::none) override;
   void onRoomLogin(const uint8_t* pubkey, bool success, bool is_admin, uint8_t perms) override;
   void loop() override;
+  void onCallBell(const uint8_t* key, const char* name, uint32_t time) override;
 
 private:
   // Latest room-login outcome + this-power-cycle logged-in set.

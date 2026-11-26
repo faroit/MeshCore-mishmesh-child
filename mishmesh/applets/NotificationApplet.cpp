@@ -4,6 +4,7 @@
 #include <mishmesh/core/AppletHost.h>
 #include <mishmesh/core/Canvas.h>
 #include <mishmesh/core/Metrics.h>
+#include <mishmesh/core/Question.h>
 #include <mishmesh/text/Fonts.h>
 #include <cstdio>
 
@@ -39,7 +40,11 @@ void NotificationApplet::raise(MessagesService* svc, const ConvoKey& key) {
   if (mc > 0) {
     MessageView m;
     if (svc->getMessage(key, mc - 1, m)) {
-      snprintf(_preview, sizeof(_preview), "%s", m.text ? m.text : "");
+      const char* preview = m.text ? m.text : "";
+      Question question;
+      if (key.type == 0 && !m.outbound && m.kind == KIND_INBOUND &&
+          parseQuestion(preview, question)) preview = question.prompt();
+      snprintf(_preview, sizeof(_preview), "%s", preview);
       if (m.senderName) snprintf(_sender, sizeof(_sender), "%s", m.senderName);
     }
   }

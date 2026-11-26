@@ -611,9 +611,20 @@ void MessageStore::addRepeat(const ConvoKey& key, uint32_t senderTime,
   _seq++;
 }
 
+bool MessageStore::hasInbound(const ConvoKey& key, uint32_t senderTime, const char* text, uint16_t len) const {
+  struct Search { uint32_t time; const char* text; uint16_t len; bool found; } search{senderTime, text, len, false};
+  forEachMessage(key, [](void* ctx, int, const MsgRecord& r) {
+    Search& s = *static_cast<Search*>(ctx);
+    if (r.kind == KIND_INBOUND && r.senderTime == s.time && r.textLen == s.len &&
+        memcmp(r.text, s.text, s.len) == 0) s.found = true;
+  }, &search);
+  return search.found;
+}
+
 // ---- queries ----
 
 int MessageStore::messageCount(const ConvoKey& key) const {
+  if (!visible(key)) return 0;
   int ci = _index.find(key);
   return ci < 0 ? 0 : (int)_index.rawCount(ci);
 }
@@ -648,7 +659,7 @@ void MessageStore::decodeRecord(const uint8_t* r, const ConvoKey& key, MsgRecord
 
 void MessageStore::forEachMessage(const ConvoKey& key,
                                   void (*cb)(void*, int, const MsgRecord&), void* ctx) const {
-  if (!_backend || !cb) return;
+  if (!visible(key) || !_backend || !cb) return;
   char name[15]; codec::keyToName(key, name);
   uint32_t fileSize = _backend->size(name);
   uint32_t stale = staleBytesOf(key);
@@ -675,6 +686,7 @@ void MessageStore::forEachMessage(const ConvoKey& key,
 }
 
 bool MessageStore::getMessage(const ConvoKey& key, int index, MsgRecord& out) const {
+  if (!visible(key)) return false;
   if (!_backend) return false;
 
   // Ensure window is loaded for this key
@@ -717,14 +729,31 @@ bool MessageStore::getMessage(const ConvoKey& key, int index, MsgRecord& out) co
   return false;
 }
 
-int  MessageStore::convoCount() const { return _index.count(); }
-
-bool MessageStore::getConvo(int index, ConvoSummary& out) const {
-  return _index.get(index, out);
+int MessageStore::convoCount() const {
+  int n = 0;
+  ConvoSummary c;
+  for (int i = 0; i < _index.count(); ++i) if (_index.get(i, c) && visible(c.key)) ++n;
+  return n;
 }
 
-uint16_t MessageStore::totalUnread() const       { return _index.totalUnread(); }
-uint16_t MessageStore::totalNotifyUnread() const { return _index.totalNotifyUnread(); }
+bool MessageStore::getConvo(int index, ConvoSummary& out) const {
+  ConvoSummary c;
+  for (int i = 0; i < _index.count(); ++i) {
+    if (_index.get(i, c) && visible(c.key) && index-- == 0) { out = c; return true; }
+  }
+  return false;
+}
+
+uint16_t MessageStore::totalUnread() const {
+  uint16_t n = 0; ConvoSummary c;
+  for (int i = 0; i < _index.count(); ++i) if (_index.get(i, c) && visible(c.key)) n += c.unread;
+  return n;
+}
+uint16_t MessageStore::totalNotifyUnread() const {
+  uint16_t n = 0; ConvoSummary c;
+  for (int i = 0; i < _index.count(); ++i) if (_index.get(i, c) && visible(c.key)) n += c.notifyUnread;
+  return n;
+}
 
 void MessageStore::setActiveConvo(const ConvoKey& key) {
   _active = key; _hasActive = true;
@@ -736,10 +765,10 @@ void MessageStore::setActiveConvo(const ConvoKey& key) {
 }
 void MessageStore::clearActiveConvo() { _hasActive = false; }
 bool MessageStore::activeConvo(ConvoKey& out) const {
-  if (!_hasActive) return false; out = _active; return true;
+  if (!_hasActive || !visible(_active)) return false; out = _active; return true;
 }
 bool MessageStore::lastInbound(ConvoKey& out) const {
-  if (!_hasLastInbound) return false; out = _lastInbound; return true;
+  if (!_hasLastInbound || !visible(_lastInbound)) return false; out = _lastInbound; return true;
 }
 
 int MessageStore::repeatCount(const ConvoKey& key, int msgIndex) const {
@@ -767,7 +796,7 @@ int MessageStore::pendingDMCount() const {
   int total = 0;
   int n = _index.count();
   for (int ci = 0; ci < n; ci++) {
-    ConvoSummary cs; if (!_index.get(ci, cs)) continue;
+    ConvoSummary cs; if (!_index.get(ci, cs) || !visible(cs.key)) continue;
     char name[15]; codec::keyToName(cs.key, name);
     uint32_t fileSize = _backend->size(name);
     uint32_t pos = 0;
@@ -791,7 +820,7 @@ bool MessageStore::getPendingDM(int index, ConvoKey& outKey, uint32_t& outSender
   if (!_backend) return false;
   int n = 0, count = _index.count();
   for (int ci = 0; ci < count; ci++) {
-    ConvoSummary cs; if (!_index.get(ci, cs)) continue;
+    ConvoSummary cs; if (!_index.get(ci, cs) || !visible(cs.key)) continue;
     char name[15]; codec::keyToName(cs.key, name);
     uint32_t fileSize = _backend->size(name);
     uint32_t pos = 0;
@@ -826,7 +855,7 @@ void MessageStore::checkPendingDMs(const ConvoKey* keys, const uint32_t* times,
   for (int i = 0; i < n; i++) stillPending[i] = false;
   if (!_backend) return;
   for (int i = 0; i < n; i++) {
-    if (keys[i].type != 0) continue;             // only DM logs hold KIND_OUT_DM
+    if (keys[i].type != 0 || !visible(keys[i])) continue;             // only DM logs hold KIND_OUT_DM
     bool walked = false;
     for (int p = 0; p < i; p++) if (keys[p].equals(keys[i])) { walked = true; break; }
     if (walked) continue;                        // this log was covered by an earlier entry
@@ -863,6 +892,7 @@ void MessageStore::failStalePendingDMs() {
 }
 
 int MessageStore::getDMText(const ConvoKey& key, uint32_t senderTime, char* buf, int cap) const {
+  if (!visible(key)) return 0;
   if (!buf || cap <= 0 || !_backend) return 0;
   buf[0] = 0;
   char name[15]; codec::keyToName(key, name);

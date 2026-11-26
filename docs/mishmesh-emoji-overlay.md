@@ -1,5 +1,9 @@
 # mishmesh emoji overlay (licensed, local-only)
 
+**Current default:** this branch bundles free MIT-licensed [9×9 Pixel Icons](../mishmesh/text/pixel-icons/README.md).
+They are compiled into normal mishmesh builds. The instructions below describe
+the optional EmojiMania override; that purchased artwork remains local-only.
+
 How the on-device emoji rendering is set up. The **art never enters this repo** —
 only the generic plumbing does. This doc is art-free process documentation.
 

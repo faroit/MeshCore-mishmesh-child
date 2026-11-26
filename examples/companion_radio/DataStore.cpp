@@ -673,3 +673,22 @@ bool DataStore::deleteBlobByKey(const uint8_t key[], int key_len) {
   return true; // return true even if file did not exist
 }
 #endif
+
+// Write a new record before replacing the old one. A leftover first-write temp
+// file is treated as a fault, never as an unconfigured/unrestricted device.
+int DataStore::loadAccessPolicy(MessageAccessPolicy::Record& out) {
+  if (!_fs->exists("/access")) return _fs->exists("/access.tmp") ? -1 : 0;
+  File f = openRead(_fs, "/access");
+  if (!f) return -1;
+  bool ok = f.size() == sizeof(out) && f.read(reinterpret_cast<uint8_t*>(&out), sizeof(out)) == sizeof(out);
+  f.close();
+  return ok ? 1 : -1;
+}
+bool DataStore::saveAccessPolicy(const MessageAccessPolicy::Record& record) {
+  File f = openWrite(_fs, "/access.tmp");
+  if (!f) return false;
+  size_t n = f.write(reinterpret_cast<const uint8_t*>(&record), sizeof(record));
+  f.close();
+  if (n != sizeof(record)) return false;
+  return _fs->rename("/access.tmp", "/access");
+}

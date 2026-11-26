@@ -19,8 +19,9 @@ struct Action {
 
 struct RecordingActions : RetryActions {
   std::vector<Action> log;
-  void retransmit(const ConvoKey& k, uint32_t st, uint8_t attempt, bool reset) override {
+  bool retransmit(const ConvoKey& k, uint32_t st, uint8_t attempt, bool reset) override {
     log.push_back({Action::Retransmit, k, st, attempt, reset});
+    return true;
   }
   void markFailed(const ConvoKey& k, uint32_t st) override {
     log.push_back({Action::Failed, k, st, 0, false});
@@ -49,6 +50,55 @@ TEST(RetryEngine, NoRetryBeforeDeadline) {
   scanOne(eng, k, 100, 7999, a);           // still inside the 8s window
   EXPECT_TRUE(a.log.empty());
   EXPECT_EQ(1, eng.trackedCount());
+}
+
+TEST(PagerDelivery, BackoffDoublesAndCapsAtThreeMinutes) {
+  EXPECT_EQ(3000u, RetryEngine::backoff(0, 1));
+  EXPECT_EQ(8000u, RetryEngine::backoff(0, 8000));
+  EXPECT_EQ(16000u, RetryEngine::backoff(1, 8000));
+  EXPECT_EQ(180000u, RetryEngine::backoff(8, 8000));
+  EXPECT_EQ(180000u, RetryEngine::backoff(255, 0xffffffff));
+}
+TEST(PagerDelivery, KeepsTryingBeyondFiveAndStopsOnAck) {
+  RetryEngine e; e.configure(true, true, true); RecordingActions a; auto k = dmKey(1);
+  ASSERT_TRUE(e.track(k, 42, 0));
+  uint32_t now = 0;
+  for (int i = 0; i < 270; ++i) {
+    now += 180000; scanOne(e, k, 42, now, a);
+  }
+  ASSERT_EQ(270u, a.log.size());
+  for (auto& action : a.log) { EXPECT_EQ(Action::Retransmit, action.kind); EXPECT_EQ(42u, action.senderTime); }
+  EXPECT_EQ(1, e.trackedCount());
+  e.acknowledged(k, 42); EXPECT_EQ(0, e.trackedCount());
+  EXPECT_FALSE(e.due(now + 180000));
+}
+TEST(PagerDelivery, TrafficNudgeHonoursMinimumGapAndRecipientForcesFlood) {
+  RetryEngine e; e.configure(true, false, true); RecordingActions a; auto k = dmKey(1);
+  e.track(k, 42, 0, 60000);
+  e.onRadioActivity(2999); EXPECT_FALSE(e.due(2999));
+  e.onRadioActivity(3000); EXPECT_TRUE(e.due(3000));
+  scanOne(e, k, 42, 3000, a); ASSERT_EQ(1u, a.log.size()); EXPECT_FALSE(a.log.back().resetPath);
+  e.onRecipientHeard(dmKey(2), 6000); EXPECT_FALSE(e.due(6000));
+  e.onRecipientHeard(k, 4000); EXPECT_FALSE(e.due(5999)); EXPECT_TRUE(e.due(6000));
+  scanOne(e, k, 42, 6000, a); ASSERT_EQ(2u, a.log.size()); EXPECT_TRUE(a.log.back().resetPath);
+}
+TEST(PagerDelivery, FailedEnqueueDoesNotConsumeAttemptOrBusyLoop) {
+  struct Failure : RecordingActions {
+    bool retransmit(const ConvoKey&, uint32_t, uint8_t, bool) override { return false; }
+  } fail;
+  RetryEngine e; e.configure(true, true, true); auto k = dmKey(1); e.track(k, 42, 0);
+  scanOne(e, k, 42, 8000, fail);
+  uint8_t attempt = 99; ASSERT_TRUE(e.attemptsFor(k, 42, attempt)); EXPECT_EQ(0, attempt);
+  e.onRadioActivity(8001); EXPECT_FALSE(e.due(8001));
+  e.onRadioActivity(11000); EXPECT_TRUE(e.due(11000));
+}
+TEST(PagerDelivery, FullOutboxReportsFailureAndWraparoundIsSafe) {
+  RetryEngine e; e.configure(true, true, true); RecordingActions a; auto k = dmKey(1);
+  ASSERT_TRUE(e.track(k, 42, 0xfffff000, 8000));
+  EXPECT_FALSE(e.due(0xfffffffe)); EXPECT_TRUE(e.due(3904));
+  scanOne(e, k, 42, 3904, a); EXPECT_EQ(1u, a.log.size());
+  for (int i = 1; i < RetryEngine::MAX_PENDING; ++i) EXPECT_TRUE(e.track(dmKey(i + 1), 42, 4000));
+  EXPECT_FALSE(e.hasRoom()); EXPECT_FALSE(e.track(dmKey(99), 42, 4000));
 }
 
 TEST(RetryEngine, RetransmitsWhenDue) {
@@ -192,7 +242,7 @@ TEST(RetryFlood, TerminatesWithBacklogAndChurn) {
   struct Glue : RetryActions {
     MessageStore* store;
     int tx = 0, failed = 0;
-    void retransmit(const ConvoKey&, uint32_t, uint8_t, bool) override { tx++; }
+    bool retransmit(const ConvoKey&, uint32_t, uint8_t, bool) override { tx++; return true; }
     void markFailed(const ConvoKey& k, uint32_t st) override { failed++; store->markFailed(k, st); }
   } glue; glue.store = &store;
 

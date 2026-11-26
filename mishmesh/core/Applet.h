@@ -5,6 +5,8 @@
 #include <mishmesh/core/AppletStorage.h>
 #include <mishmesh/core/InputEvent.h>
 
+class MessageAccessPolicy;
+
 namespace mishmesh {
 
 class Canvas;
@@ -73,6 +75,7 @@ struct TxPaTable {
 // the framework free of companion-specific types (NodePrefs, RTCClock, board).
 struct AppServices {
   virtual ~AppServices() {}
+  virtual MessageAccessPolicy* messageAccess() { return nullptr; }
   virtual const char* nodeName() const = 0;
   virtual uint16_t    batteryMillivolts() const = 0;
   virtual uint32_t    epochSeconds() const = 0;   // UNIX seconds; 0 if unknown

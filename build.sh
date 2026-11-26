@@ -141,7 +141,7 @@ build_firmware() {
   FIRMWARE_BUILD_DATE=$(date '+%d-%b-%Y')
 
   case "$1" in
-    *_mishmesh)
+    *_mishmesh|*_mishmesh-child)
       # mishmesh firmwares carry two versions: the mishmesh UI version (mm) and
       # the meshcore base it rides on (mc). Both default to the #ifndef values in
       # the headers and can be overridden by the MISHMESH_VERSION / FIRMWARE_VERSION
@@ -151,8 +151,12 @@ build_firmware() {
       MM_VER="${MM_VER:-v0.0.0}"
       MC_VER="${MC_VER:-v0.0.0}"
 
-      # compiled version shown on the About screen (mc line); keep the hash suffix
-      FIRMWARE_VERSION_STRING="${MC_VER}-${COMMIT_HASH}"
+      # Keep child builds' explicit version readable on the About screen.
+      # Other mishmesh artifacts retain the commit suffix used by releases.
+      case "$1" in
+        *_mishmesh-child) FIRMWARE_VERSION_STRING="$MC_VER" ;;
+        *) FIRMWARE_VERSION_STRING="${MC_VER}-${COMMIT_HASH}" ;;
+      esac
 
       # e.g: WioTrackerL1_companion_radio_ble_mishmesh_mm-v1.0.0_mc-v1.16.0-SHA
       FIRMWARE_FILENAME="$1_mm-${MM_VER}_mc-${MC_VER}-${COMMIT_HASH}"

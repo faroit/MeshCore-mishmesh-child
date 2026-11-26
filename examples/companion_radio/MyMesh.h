@@ -70,6 +70,7 @@
 #include <helpers/TransportKeyStore.h>
 // [mishmesh]
 #include <mishmesh/core/MessageStore.h>
+#include <mishmesh/core/RetryEngine.h>
 // [/mishmesh]
 
 /* -------------------------------------------------------------------------------------- */
@@ -93,7 +94,7 @@ struct AdvertPath {
   uint8_t path[MAX_PATH_SIZE];
 };
 
-class MyMesh : public BaseChatMesh, public DataStoreHost {
+class MyMesh : public BaseChatMesh, public DataStoreHost, private MessageAccessPolicy::Storage {
 public:
   class Listener {
     public:
@@ -111,12 +112,20 @@ public:
       virtual void onTraceRecv(mesh::Packet *pkt, uint32_t tag, uint32_t auth_code, uint8_t flags,
                                const uint8_t *path_snrs, const uint8_t *path_hashes, uint8_t path_len) { }
       virtual void onRawDataRecv(mesh::Packet *pkt) { }
+      virtual void onCallBell(const uint8_t* key, const char* name, uint32_t timestamp) { }
       // [mishmesh] Result of a room/repeater login started on-device. `perms` are
       // the server's ACL permission bits (0 = guest/read-only).
       virtual void onRoomLogin(const uint8_t* pubkey, bool success, bool is_admin, uint8_t perms) { }
       // [/mishmesh]
       virtual ~Listener() { }
   };
+  MessageAccessPolicy& messageAccess() { return _message_access; }
+  bool isContactAllowed(const ContactInfo& c) const override {
+    return !_message_access.restricted() ||
+           (c.type == ADV_TYPE_CHAT && _message_access.allows(c.id.pub_key));
+  }
+  bool areChannelsAllowed() const override { return !_message_access.restricted(); }
+  bool areRoomMessagesAllowed() const override { return !_message_access.restricted(); }
 
   MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMeshTables &tables, DataStore& store);
 
@@ -242,6 +251,7 @@ public:
   void uiSetContactsSaveHook(void (*fn)(void* ctx), void* ctx) { _mm_save_hook = fn; _mm_save_ctx = ctx; }
   // [/mishmesh]
 
+  void uiSetRetryEngine(mishmesh::RetryEngine* retry) { _mm_retry = retry; }
   void uiSetMessageStore(mishmesh::MessageStore* s) { _mm_store = s; }
   DataStore* getStore() const { return _store; }
   // On-device send mirroring CMD_SEND_TXT_MSG: DM (k.type==0) or channel (k.type==1).
@@ -259,7 +269,7 @@ public:
   // Auto-retry: re-send an already-stored, still-undelivered DM (identified by
   // its original senderTime). attempt bumps the ACK hash; resetPath floods.
   bool mishmeshRetransmit(const mishmesh::ConvoKey& k, uint32_t senderTime,
-                          uint8_t attempt, bool resetPath);
+                          uint8_t attempt, bool resetPath, const uint8_t* scope_key16 = nullptr);
   // On-device room/repeater login mirroring CMD_SEND_LOGIN. Looks up the contact
   // by full pub key, sends the password, and arms the login response to route to
   // Listener::onRoomLogin() (see onContactResponse). Returns false if the
@@ -372,6 +382,10 @@ public:
   bool hasPendingWork() const;
 
 private:
+  MessageAccessPolicy _message_access;
+  int loadAccessPolicy(MessageAccessPolicy::Record& out) override { return _store->loadAccessPolicy(out); }
+  bool saveAccessPolicy(const MessageAccessPolicy::Record& r) override { return _store->saveAccessPolicy(r); }
+  void accessPolicyChanged() override;
   void writeOKFrame();
   void writeErrFrame(uint8_t err_code);
   void writeDisabledFrame();
@@ -453,6 +467,7 @@ private:
   bool removeContactAndBlob(ContactInfo& contact);
   void markContactsDirty();
   mishmesh::MessageStore* _mm_store = nullptr;
+  mishmesh::RetryEngine* _mm_retry = nullptr;
   void logRx(mesh::Packet* pkt, int len, float score) override;
   bool mishmeshSendTextImpl(const mishmesh::ConvoKey& k, const char* text,
                             uint32_t* senderTimeOut);  // send body, scope-agnostic
@@ -477,6 +492,7 @@ private:
     unsigned long msg_sent;
     uint32_t ack;
     ContactInfo* contact;
+    uint32_t mm_sender_time = 0;
   };
   #define EXPECTED_ACK_TABLE_SIZE 8
   AckTableEntry expected_ack_table[EXPECTED_ACK_TABLE_SIZE]; // circular table

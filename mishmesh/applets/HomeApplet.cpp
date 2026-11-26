@@ -7,6 +7,7 @@
 #include <mishmesh/core/MessagesService.h>
 #include <mishmesh/core/TimeFormat.h>
 #include <mishmesh/core/UiPrefs.h>
+#include <helpers/MessageAccessPolicy.h>
 #include <mishmesh/sound/SoundEngine.h>
 #include <mishmesh/text/Fonts.h>
 #include <stdio.h>
@@ -20,6 +21,12 @@ static const int MARGIN = 4;
 // The hint bar is the recessive tier on a 64px panel, but caption type is too
 // faint to read on a larger one - promote it where there is room to spare.
 static const Font* hintFont(const Canvas& c) { return tierFont(c); }
+
+static const AppletRegistration* messagesShortcut() {
+  for (AppletRegistration* r = registeredApplets(); r; r = r->next)
+    if (r->placement == Placement::AppMenu && strcmp(r->label, "Messages") == 0) return r;
+  return nullptr;
+}
 
 void HomeApplet::hintLabel(const char* label, char out[5]) {
   int n = 0;
@@ -169,8 +176,13 @@ int HomeApplet::onRender(Canvas& c) {
   {
     const Font* f = hintFont(c);
     char l4[5] = {0}, r4[5] = {0};
-    const AppletRegistration* lr = uiPrefs().quickAction(UiPrefs::SLOT_LEFT);
-    const AppletRegistration* rr = uiPrefs().quickAction(UiPrefs::SLOT_RIGHT);
+    MessageAccessPolicy* access = _app ? _app->messageAccess() : nullptr;
+    const bool childLocked = access && access->restricted();
+    const AppletRegistration* lr = childLocked
+        ? messagesShortcut()
+        : uiPrefs().quickAction(UiPrefs::SLOT_LEFT);
+    const AppletRegistration* rr = childLocked
+        ? nullptr : uiPrefs().quickAction(UiPrefs::SLOT_RIGHT);
     if (lr) hintLabel(lr->label, l4);
     if (rr) hintLabel(rr->label, r4);
     // measure the run: [<l4] [#Apps] [vTgls] [r4>]
@@ -266,8 +278,11 @@ bool HomeApplet::onInput(InputEvent ev) {
       return true;
     case InputEvent::NavLeft:
     case InputEvent::NavRight: {
-      const AppletRegistration* r = uiPrefs().quickAction(
-          ev == InputEvent::NavLeft ? UiPrefs::SLOT_LEFT : UiPrefs::SLOT_RIGHT);
+      MessageAccessPolicy* access = _app ? _app->messageAccess() : nullptr;
+      const bool childLocked = access && access->restricted();
+      const AppletRegistration* r = childLocked
+          ? (ev == InputEvent::NavLeft ? messagesShortcut() : nullptr)
+          : uiPrefs().quickAction(ev == InputEvent::NavLeft ? UiPrefs::SLOT_LEFT : UiPrefs::SLOT_RIGHT);
       if (r && _host) { _host->push(r->applet); return true; }
       return false;
     }

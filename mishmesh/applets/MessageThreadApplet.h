@@ -128,6 +128,8 @@ private:
     const char* label(int i) const override { return quickReplyStore().text(i); }
   } _qrModel;
   void openQuickReplies();
+  bool openQuestion(int index);
+  bool _questionOnOpen = false;
   int       _barRow = -1;     // -1 = on a message; 0 = Write; 1 = Quick
   bool      _composeOnOpen = false;   // one-shot: focus the Write button on next onStart
   Button    _btn;             // reused to draw each stacked action button in turn

@@ -979,7 +979,7 @@ TEST(MessageThread, StatusLabelShowsRetryCount) {
 
   m.retryAttempt = 2;                                  // mid-retry
   MessageThreadApplet::statusLabel(m, buf, sizeof(buf));
-  EXPECT_STREQ("Retrying 2/5", buf);
+  EXPECT_STREQ("Retrying 2", buf);
 
   m.status = ST_DELIVERED; m.tripTimeMs = 1500; m.retryAttempt = 3;  // delivery wins
   MessageThreadApplet::statusLabel(m, buf, sizeof(buf));

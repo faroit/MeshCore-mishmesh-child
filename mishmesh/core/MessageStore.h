@@ -29,6 +29,12 @@ public:
   // Persist the in-RAM index to the backend's index blob.
   void saveIndex();
 
+  // Presentation/access filter for parent controls; stored history is retained.
+  void setVisibilityFilter(bool (*filter)(const ConvoKey&, void*), void* ctx) {
+    _visible = filter; _visibleCtx = ctx; visibilityChanged();
+  }
+  void visibilityChanged() { _windowValid = false; _hasActive = false; ++_seq; }
+
   // ---- capture ----
   void appendInbound(const ConvoKey& key, const char* text, uint16_t textLen,
                      uint32_t senderTime, uint32_t recvTime,
@@ -43,6 +49,8 @@ public:
   void updateExpectedAck(const ConvoKey& key, uint32_t senderTime, uint32_t newAck);
   void addRepeat(const ConvoKey& key, uint32_t senderTime,
                  int8_t snrx4, const uint8_t* path, uint8_t pathLen);
+
+  bool hasInbound(const ConvoKey& key, uint32_t senderTime, const char* text, uint16_t len) const;
 
   // ---- queries ----
   int  convoCount() const;                              // recency-sorted (newest first)
@@ -88,6 +96,9 @@ public:
   uint32_t seq() const { return _seq; }
 
 private:
+  bool (*_visible)(const ConvoKey&, void*) = nullptr;
+  void* _visibleCtx = nullptr;
+  bool visible(const ConvoKey& key) const { return !_visible || _visible(key, _visibleCtx); }
   MsgLogBackend* _backend;
   ConvoIndex     _index;
   uint32_t       _seq;

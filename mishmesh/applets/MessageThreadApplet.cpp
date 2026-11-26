@@ -1,6 +1,7 @@
 // mishmesh/applets/MessageThreadApplet.cpp
 #include "MessageThreadApplet.h"
 #include "MessagePathApplet.h"
+#include "QuestionApplet.h"
 #include "ChatNotifyApplet.h"
 #include "ChannelShareApplet.h"
 #include <mishmesh/applets/KeypadApplet.h>
@@ -83,7 +84,7 @@ void MessageThreadApplet::statusLabel(const MessageView& m, char* buf, int cap) 
   } else if (m.status == ST_FAILED) {
     snprintf(buf, cap, "Failed");
   } else if (m.retryAttempt > 0) {
-    snprintf(buf, cap, "Retrying %u/%u", (unsigned)m.retryAttempt, (unsigned)RetryEngine::MAX_RETRIES);
+    snprintf(buf, cap, "Retrying %u", (unsigned)m.retryAttempt);
   } else {
     snprintf(buf, cap, "Sent");
   }
@@ -125,6 +126,7 @@ void MessageThreadApplet::onStart(AppletContext& ctx) {
   _qrOpen = false;
   _barRow = _composeOnOpen ? 0 : -1;   // open focused on the Write button when requested
   _composeOnOpen = false;              // one-shot
+  _questionOnOpen = _barRow == -1;
 
   // Header tab bar: [0] conversation (label tracks _titleBuf), [1] Settings.
   snprintf(_titleBuf, sizeof(_titleBuf), "%s", resolveTitle());
@@ -139,10 +141,20 @@ void MessageThreadApplet::onStart(AppletContext& ctx) {
   if (_svc) _svc->setActiveConvo(_key);
 }
 
+bool MessageThreadApplet::openQuestion(int index) {
+  if (!_svc || !_host || _key.type != 0) return false;
+  MessageView message;
+  if (!_svc->getMessage(_key, index, message) ||
+      !questionApplet().setQuestion(_key, message, _titleBuf)) return false;
+  _host->push(&questionApplet());
+  return true;
+}
+
 void MessageThreadApplet::onForeground() {
   snprintf(_titleBuf, sizeof(_titleBuf), "%s", resolveTitle());
   if (_svc) _svc->setActiveConvo(_key);
   refreshRegion();
+  if (_questionOnOpen) { _questionOnOpen = false; openQuestion(_focus); }
 }
 void MessageThreadApplet::onBackground() { if (_svc) _svc->clearActiveConvo(); }
 void MessageThreadApplet::onStop() {
@@ -649,6 +661,7 @@ bool MessageThreadApplet::onConversationInput(InputEvent ev) {
     return true;
   }
   if (ev == InputEvent::Select && n > 0) {
+    if (openQuestion(_focus)) return true;
     MessageView m; bool hasPath = false, repeats = false, canResend = false;
     if (_svc && _svc->getMessage(_key, _focus, m)) {
       hasPath = (m.kind == KIND_INBOUND) || (m.kind == KIND_OUT_CHAN);

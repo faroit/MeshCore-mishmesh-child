@@ -885,6 +885,36 @@ TEST(BootSettle, FailedRotationLeavesIndexMatchingLog) {
   MessageStore s2; s2.begin(&backend);            // reconcile finds nothing to repair
   EXPECT_EQ(PER_CHAT_CAP + 1, s2.messageCount(dm("ALICE!")));
   EXPECT_EQ(s.totalUnread(), s2.totalUnread());
+
+TEST_F(MSFix, VisibilityFilterHidesHistoryUnreadAndRetryTextWithoutDeletingIt) {
+  const auto allowed = dm("ALICE!");
+  const auto denied = dm("BOBBBB");
+  const auto channel = channelKey(0);
+  s.appendInbound(allowed, "yes", 3, 1, 1, 0, nullptr, 0);
+  s.appendInbound(denied, "secret", 6, 2, 2, 0, nullptr, 0);
+  s.appendInbound(channel, "public", 6, 3, 3, 0, nullptr, 0);
+  s.appendOutboundDM(denied, "pending", 7, 4, 4, 99, 0);
+  s.setVisibilityFilter([](const ConvoKey& k, void*) {
+    return k.equals(dm("ALICE!"));
+  }, nullptr);
+  EXPECT_EQ(1, s.convoCount()); EXPECT_EQ(1, s.totalUnread());
+  ConvoSummary cs;
+  ASSERT_TRUE(s.getConvo(0, cs)); EXPECT_TRUE(cs.key.equals(allowed));
+  EXPECT_FALSE(s.getConvo(1, cs));
+  EXPECT_EQ(0, s.messageCount(denied)); EXPECT_EQ(0, s.messageCount(channel));
+  MsgRecord rec;
+  EXPECT_FALSE(s.getMessage(denied, 0, rec));
+  EXPECT_FALSE(s.getMessage(channel, 0, rec));
+  int visits = 0;
+  s.forEachMessage(denied, [](void* p, int, const MsgRecord&) { ++*static_cast<int*>(p); }, &visits);
+  EXPECT_EQ(0, visits);
+  char text[32]; EXPECT_EQ(0, s.getDMText(denied, 4, text, sizeof(text)));
+  ConvoKey k; uint32_t time;
+  EXPECT_EQ(0, s.pendingDMCount()); EXPECT_FALSE(s.getPendingDM(0, k, time));
+  EXPECT_FALSE(s.lastInbound(k));
+  s.setVisibilityFilter(nullptr, nullptr);
+  EXPECT_EQ(3, s.convoCount()); EXPECT_EQ(2, s.messageCount(denied));
+  EXPECT_TRUE(s.getMessage(channel, 0, rec));
 }
 
 int main(int argc, char** argv) {

@@ -45,6 +45,7 @@ public:
   uint32_t tmRemainingMs(uint32_t nowMs) const;
   void     tmToggle(uint32_t nowMs);           // start / pause / resume
   void     tmReset();
+  bool     tmStartOnce(uint32_t secs, uint32_t nowMs);  // idle only, keeps the saved preset
 
   // --- pomodoro (a self-restarting timer with a Focus/Break phase sequencer;
   // config persists as key "pmcf", running state is millis-based like the timer

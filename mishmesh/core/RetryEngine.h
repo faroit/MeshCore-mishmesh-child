@@ -13,7 +13,7 @@ struct RetryActions {
   // Re-transmit a still-undelivered direct message. `attempt` is the retry
   // number (1..MAX_RETRIES). `resetPath` asks the host to clear the contact's
   // learned route first, so this attempt falls back to flood routing.
-  virtual void retransmit(const ConvoKey& key, uint32_t senderTime,
+  virtual bool retransmit(const ConvoKey& key, uint32_t senderTime,
                           uint8_t attempt, bool resetPath) = 0;
   // Give up on a message after the last retry - mark it failed.
   virtual void markFailed(const ConvoKey& key, uint32_t senderTime) = 0;
@@ -41,15 +41,24 @@ public:
   RetryEngine() { reset(); }
   void reset();
 
-  void configure(bool autoRetry, bool autoResetPath) {
-    _enabled = autoRetry; _resetPath = autoResetPath;
+  void configure(bool autoRetry, bool autoResetPath, bool persistent = false) {
+    _enabled = autoRetry; _resetPath = autoResetPath; _persistent = persistent;
   }
   bool enabled() const { return _enabled; }
 
   // Start watching a DM the device just sent. Ignored when the table is full -
   // with MAX_PENDING re-transmissions already in flight, a further send simply
   // gets no auto-retry rather than displacing one that does.
-  void track(const ConvoKey& key, uint32_t senderTime, uint32_t now);
+  bool track(const ConvoKey& key, uint32_t senderTime, uint32_t now,
+             uint32_t baseTimeout = RETRY_INTERVAL_MS);
+  bool due(uint32_t now) const;
+  void acknowledged(const ConvoKey& key, uint32_t time);
+  bool hasRoom() const { return trackedCount() < MAX_PENDING; }
+  void onRadioActivity(uint32_t now);
+  void onRecipientHeard(const ConvoKey& key, uint32_t now);
+  static uint32_t backoff(uint8_t attempt, uint32_t baseTimeout);
+  static const uint32_t NUDGE_GAP_MS = 3000;
+  static const uint32_t BACKOFF_CAP_MS = 180000;
 
   // --- scan protocol: call once per tick ---
   void beginScan();                                    // mark all entries unseen
@@ -68,11 +77,13 @@ private:
     ConvoKey key;
     uint32_t senderTime;
     uint8_t  attempts;
-    uint32_t dueAt;
+    uint32_t dueAt, lastSendAt, baseTimeout;
+    bool forceFlood;
   };
   Entry _e[MAX_PENDING];
   bool  _enabled;
   bool  _resetPath;
+  bool  _persistent;
 
   int find(const ConvoKey& key, uint32_t senderTime) const;
 };

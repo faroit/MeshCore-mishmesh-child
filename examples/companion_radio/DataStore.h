@@ -4,6 +4,7 @@
 #include <helpers/ContactInfo.h>
 #include <helpers/ChannelDetails.h>
 #include "NodePrefs.h"
+#include <helpers/MessageAccessPolicy.h>
 
 class DataStoreHost {
 public:
@@ -13,7 +14,7 @@ public:
   virtual bool getChannelForSave(uint8_t channel_idx, ChannelDetails& ch) =0;
 };
 
-class DataStore {
+class DataStore : public MessageAccessPolicy::Storage {
   FILESYSTEM* _fs;
   FILESYSTEM* _fsExtra;
   mesh::RTCClock* _clock;
@@ -28,6 +29,8 @@ public:
   DataStore(FILESYSTEM& fs, mesh::RTCClock& clock);
   DataStore(FILESYSTEM& fs, FILESYSTEM& fsExtra, mesh::RTCClock& clock);
   void begin();
+  int loadAccessPolicy(MessageAccessPolicy::Record& out) override;
+  bool saveAccessPolicy(const MessageAccessPolicy::Record& record) override;
   bool formatFileSystem();
   FILESYSTEM* getPrimaryFS() const { return _fs; }
   FILESYSTEM* getSecondaryFS() const { return _fsExtra; }

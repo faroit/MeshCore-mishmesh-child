@@ -203,7 +203,7 @@ void BaseChatMesh::onAdvertRecv(mesh::Packet* packet, const mesh::Identity& id, 
 int BaseChatMesh::searchPeersByHash(const uint8_t* hash) {
   int n = 0;
   for (int i = 0; i < num_contacts && n < MAX_SEARCH_RESULTS; i++) {
-    if (contacts[i].id.isHashMatch(hash)) {
+    if (isContactAllowed(contacts[i]) && contacts[i].id.isHashMatch(hash)) {
       matching_peer_indexes[n++] = i;  // store the INDEXES of matching contacts (for subsequent 'peer' methods)
     }
   }
@@ -227,6 +227,7 @@ void BaseChatMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender
   }
 
   ContactInfo& from = contacts[i];
+  if (!isContactAllowed(from)) return;
 
   if (type == PAYLOAD_TYPE_TXT_MSG && len > 5) {
     uint32_t sender_timestamp;
@@ -288,6 +289,7 @@ void BaseChatMesh::onPeerDataRecv(mesh::Packet* packet, uint8_t type, int sender
         }
       }
     } else if (flags == TXT_TYPE_SIGNED_PLAIN) {
+      if (!areRoomMessagesAllowed()) return;
       if (sender_timestamp > from.sync_since) {  // make sure 'sync_since' is up-to-date
         from.sync_since = sender_timestamp;
       }
@@ -346,6 +348,7 @@ bool BaseChatMesh::onPeerPathRecv(mesh::Packet* packet, int sender_idx, const ui
   }
 
   ContactInfo& from = contacts[i];
+  if (!isContactAllowed(from)) return false;
 
   return onContactPathRecv(from, packet->path, packet->path_len, path, path_len, extra_type, extra, extra_len);
 }
@@ -391,6 +394,7 @@ void BaseChatMesh::handleReturnPathRetry(const ContactInfo& contact, const uint8
 
 #ifdef MAX_GROUP_CHANNELS
 int BaseChatMesh::searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel dest[], int max_matches) {
+  if (!areChannelsAllowed()) return 0;
   int n = 0;
   for (int i = 0; i < MAX_GROUP_CHANNELS && n < max_matches; i++) {
     // [mishmesh] A slot is empty when its secret is all zero, not when it is
@@ -408,6 +412,7 @@ int BaseChatMesh::searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel d
 #endif
 
 void BaseChatMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::GroupChannel& channel, uint8_t* data, size_t len) {
+  if (!areChannelsAllowed()) return;
   if (type == PAYLOAD_TYPE_GRP_TXT) {
     if (len < 5) {
       MESH_DEBUG_PRINTLN("onGroupDataRecv: dropping short group text payload len=%d", (uint32_t)len);
@@ -451,9 +456,8 @@ void BaseChatMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mes
 mesh::Packet* BaseChatMesh::composeMsgPacket(const ContactInfo& recipient, uint32_t timestamp, uint8_t attempt, const char *text, uint32_t& expected_ack) {
   int text_len = strlen(text);
   if (text_len > MAX_TEXT_LEN) return NULL;
-  if (attempt > 3 && text_len > MAX_TEXT_LEN-2) return NULL;
 
-  uint8_t temp[5+MAX_TEXT_LEN+1];
+  uint8_t temp[5+MAX_TEXT_LEN+2];
   memcpy(temp, &timestamp, 4);   // mostly an extra blob to help make packet_hash unique
   temp[4] = (attempt & 3);
   memcpy(&temp[5], text, text_len + 1);
@@ -471,6 +475,7 @@ mesh::Packet* BaseChatMesh::composeMsgPacket(const ContactInfo& recipient, uint3
 }
 
 int  BaseChatMesh::sendMessage(const ContactInfo& recipient, uint32_t timestamp, uint8_t attempt, const char* text, uint32_t& expected_ack, uint32_t& est_timeout) {
+  if (!isContactAllowed(recipient)) return MSG_SEND_FAILED;
   mesh::Packet* pkt = composeMsgPacket(recipient, timestamp, attempt, text, expected_ack);
   if (pkt == NULL) return MSG_SEND_FAILED;
 
@@ -490,6 +495,7 @@ int  BaseChatMesh::sendMessage(const ContactInfo& recipient, uint32_t timestamp,
 }
 
 int  BaseChatMesh::sendCommandData(const ContactInfo& recipient, uint32_t timestamp, uint8_t attempt, uint8_t txt_type, const char* text, uint32_t& est_timeout) {
+  if (!isContactAllowed(recipient)) return MSG_SEND_FAILED;
   int text_len = strlen(text);
   if (text_len > MAX_TEXT_LEN) return MSG_SEND_FAILED;
 
@@ -516,6 +522,7 @@ int  BaseChatMesh::sendCommandData(const ContactInfo& recipient, uint32_t timest
 }
 
 bool BaseChatMesh::sendGroupMessage(uint32_t timestamp, mesh::GroupChannel& channel, const char* sender_name, const char* text, int text_len) {
+  if (!areChannelsAllowed()) return false;
   uint8_t temp[5+MAX_TEXT_LEN+32];
   memcpy(temp, &timestamp, 4);   // mostly an extra blob to help make packet_hash unique
   temp[4] = 0;  // TXT_TYPE_PLAIN
@@ -537,6 +544,7 @@ bool BaseChatMesh::sendGroupMessage(uint32_t timestamp, mesh::GroupChannel& chan
 }
 
 bool BaseChatMesh::sendGroupData(mesh::GroupChannel& channel, uint8_t* path, uint8_t path_len, uint16_t data_type, const uint8_t* data, int data_len) {
+  if (!areChannelsAllowed()) return false;
   if (data_len < 0) {
     MESH_DEBUG_PRINTLN("sendGroupData: invalid negative data_len=%d", data_len);
     return false;
@@ -601,6 +609,7 @@ bool BaseChatMesh::importContact(const uint8_t src_buf[], uint8_t len) {
 }
 
 int BaseChatMesh::sendLogin(const ContactInfo& recipient, const char* password, uint32_t& est_timeout) {
+  if (!isContactAllowed(recipient)) return MSG_SEND_FAILED;
   mesh::Packet* pkt;
   {
     int tlen;
@@ -636,6 +645,7 @@ int BaseChatMesh::sendLogin(const ContactInfo& recipient, const char* password, 
 }
 
 int BaseChatMesh::sendAnonReq(const ContactInfo& recipient, const uint8_t* data, uint8_t len, uint32_t& tag, uint32_t& est_timeout) {
+  if (!isContactAllowed(recipient)) return MSG_SEND_FAILED;
   mesh::Packet* pkt;
   {
     uint8_t temp[MAX_PACKET_PAYLOAD];
@@ -661,6 +671,7 @@ int BaseChatMesh::sendAnonReq(const ContactInfo& recipient, const uint8_t* data,
 }
 
 int  BaseChatMesh::sendRequest(const ContactInfo& recipient, const uint8_t* req_data, uint8_t data_len, uint32_t& tag, uint32_t& est_timeout) {
+  if (!isContactAllowed(recipient)) return MSG_SEND_FAILED;
   if (data_len > MAX_PACKET_PAYLOAD - 16) return MSG_SEND_FAILED;
 
   mesh::Packet* pkt;
@@ -688,6 +699,7 @@ int  BaseChatMesh::sendRequest(const ContactInfo& recipient, const uint8_t* req_
 }
 
 int  BaseChatMesh::sendRequest(const ContactInfo& recipient, uint8_t req_type, uint32_t& tag, uint32_t& est_timeout) {
+  if (!isContactAllowed(recipient)) return MSG_SEND_FAILED;
   mesh::Packet* pkt;
   {
     uint8_t temp[13];
@@ -715,6 +727,7 @@ int  BaseChatMesh::sendRequest(const ContactInfo& recipient, uint8_t req_type, u
 }
 
 bool BaseChatMesh::startConnection(const ContactInfo& contact, uint16_t keep_alive_secs) {
+  if (!isContactAllowed(contact)) return false;
   int use_idx = -1;
   for (int i = 0; i < MAX_CONNECTIONS; i++) {
     if (connections[i].keep_alive_millis == 0) {  // free slot?
@@ -801,7 +814,7 @@ void BaseChatMesh::checkConnections() {
 
     if (millisHasNowPassed(connections[i].next_ping)) {
       auto contact = lookupContactByPubKey(connections[i].server_id.pub_key, PUB_KEY_SIZE);
-      if (contact == NULL) {
+      if (contact == NULL || !isContactAllowed(*contact)) {
         MESH_DEBUG_PRINTLN("checkConnections(): Keep_alive contact not found!");
         continue;
       }
@@ -909,6 +922,7 @@ bool BaseChatMesh::removeContact(ContactInfo& contact) {
 #include <base64.hpp>
 
 ChannelDetails* BaseChatMesh::addChannel(const char* name, const char* psk_base64) {
+  if (!areChannelsAllowed()) return NULL;
   if (num_channels < MAX_GROUP_CHANNELS) {
     auto dest = &channels[num_channels];
 
@@ -924,6 +938,7 @@ ChannelDetails* BaseChatMesh::addChannel(const char* name, const char* psk_base6
   return NULL;
 }
 bool BaseChatMesh::getChannel(int idx, ChannelDetails& dest) {
+  if (!areChannelsAllowed()) return false;
   if (idx >= 0 && idx < MAX_GROUP_CHANNELS) {
     dest = channels[idx];
     return true;
@@ -931,6 +946,7 @@ bool BaseChatMesh::getChannel(int idx, ChannelDetails& dest) {
   return false;
 }
 bool BaseChatMesh::setChannel(int idx, const ChannelDetails& src) {
+  if (!areChannelsAllowed()) return false;
   static uint8_t zeroes[] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
 
   if (idx >= 0 && idx < MAX_GROUP_CHANNELS) {
@@ -954,12 +970,15 @@ int BaseChatMesh::findChannelIdx(const mesh::GroupChannel& ch) {
 }
 #else
 ChannelDetails* BaseChatMesh::addChannel(const char* name, const char* psk_base64) {
+  if (!areChannelsAllowed()) return NULL;
   return NULL;  // not supported
 }
 bool BaseChatMesh::getChannel(int idx, ChannelDetails& dest) {
+  if (!areChannelsAllowed()) return false;
   return false;
 }
 bool BaseChatMesh::setChannel(int idx, const ChannelDetails& src) {
+  if (!areChannelsAllowed()) return false;
   return false;
 }
 int BaseChatMesh::findChannelIdx(const mesh::GroupChannel& ch) {

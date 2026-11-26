@@ -133,6 +133,10 @@ protected:
   virtual int  getBlobByKey(const uint8_t key[], int key_len, uint8_t dest_buf[]) { return 0; }  // not implemented
   virtual bool putBlobByKey(const uint8_t key[], int key_len, const uint8_t src_buf[], int len) { return false; }
 
+  virtual bool isContactAllowed(const ContactInfo& contact) const { return true; }
+  virtual bool areChannelsAllowed() const { return true; }
+  virtual bool areRoomMessagesAllowed() const { return true; }
+
   // Mesh overrides
   void onAdvertRecv(mesh::Packet* packet, const mesh::Identity& id, uint32_t timestamp, const uint8_t* app_data, size_t app_data_len) override;
   int searchPeersByHash(const uint8_t* hash) override;

@@ -7,6 +7,7 @@
 #include <Mesh.h>
 // [mishmesh]
 #include <ed_25519.h>
+#include <mishmesh/core/CallBell.h>
 // [/mishmesh]
 
 #define CMD_APP_START                 1
@@ -165,6 +166,7 @@ void MyMesh::writeDisabledFrame() {
 }
 
 void MyMesh::writeContactRespFrame(uint8_t code, const ContactInfo &contact) {
+  if (!isContactAllowed(contact)) return;
   int i = 0;
   out_frame[i++] = code;
   memcpy(&out_frame[i], contact.id.pub_key, PUB_KEY_SIZE);
@@ -285,6 +287,7 @@ uint8_t MyMesh::getExtraAckTransmitCount() const {
 }
 
 void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
+  if (_message_access.restricted()) return;
   if (_serial->isConnected() && len + 3 <= MAX_FRAME_SIZE) {
     int i = 0;
     out_frame[i++] = PUSH_CODE_LOG_RX_DATA;
@@ -298,10 +301,12 @@ void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
 }
 
 bool MyMesh::isAutoAddEnabled() const {
+  if (_message_access.restricted()) return false;
   return (_prefs.manual_add_contacts & 1) == 0;
 }
 
 bool MyMesh::shouldAutoAddContactType(uint8_t contact_type) const {
+  if (_message_access.restricted()) return false;
   if ((_prefs.manual_add_contacts & 1) == 0) {
     return true;
   }
@@ -354,6 +359,8 @@ void MyMesh::onContactsFull() {
 void MyMesh::onDiscoveredContact(ContactInfo &contact, bool is_new, uint8_t path_len, const uint8_t* path) {
   // [mishmesh] is_new == seen-but-not-added (no auto-add / hop limit / full); buffer it
   if (is_new) uiNoteDiscovery(contact);
+  if (!isContactAllowed(contact)) return;
+  if (_mm_retry) _mm_retry->onRecipientHeard(mishmesh::directKey(contact.id.pub_key), _ms->getMillis());
   uiNoteRecentAdvert(contact);   // every advert (contacts included) for the Recent tab
   // [/mishmesh]
   if (_serial->isConnected()) {
@@ -422,7 +429,8 @@ ContactInfo*  MyMesh::processAck(const uint8_t *data) {
   }
   // see if matches any in a table
   for (int i = 0; i < EXPECTED_ACK_TABLE_SIZE; i++) {
-    if (memcmp(data, &expected_ack_table[i].ack, 4) == 0) { // got an ACK from recipient
+    if (expected_ack_table[i].contact && isContactAllowed(*expected_ack_table[i].contact) &&
+        expected_ack_table[i].ack && memcmp(data, &expected_ack_table[i].ack, 4) == 0) { // got an ACK from recipient
       out_frame[0] = PUSH_CODE_SEND_CONFIRMED;
       memcpy(&out_frame[1], data, 4);
       uint32_t trip_time = _ms->getMillis() - expected_ack_table[i].msg_sent;
@@ -431,6 +439,11 @@ ContactInfo*  MyMesh::processAck(const uint8_t *data) {
       // [mishmesh]
       if (_mm_store) {
         uint16_t ms = (trip_time > 0xFFFFu) ? 0xFFFFu : (uint16_t)trip_time;
+        if (expected_ack_table[i].mm_sender_time && expected_ack_table[i].contact) {
+          auto k = mishmesh::directKey(expected_ack_table[i].contact->id.pub_key);
+          _mm_store->updateExpectedAck(k, expected_ack_table[i].mm_sender_time, expected_ack_table[i].ack);
+          if (_mm_retry) _mm_retry->acknowledged(k, expected_ack_table[i].mm_sender_time);
+        }
         _mm_store->markDelivered(expected_ack_table[i].ack, ms);
       }
       // [/mishmesh]
@@ -445,6 +458,11 @@ ContactInfo*  MyMesh::processAck(const uint8_t *data) {
 
 void MyMesh::queueMessage(const ContactInfo &from, uint8_t txt_type, mesh::Packet *pkt,
                           uint32_t sender_timestamp, const uint8_t *extra, int extra_len, const char *text) {
+  // Retries retain timestamp/body but have fresh packet hashes. ACK them in
+  // BaseChatMesh, without storing or alerting a second time.
+  if (txt_type == TXT_TYPE_PLAIN && _mm_store &&
+      _mm_store->hasInbound(mishmesh::directKey(from.id.pub_key), sender_timestamp,
+                            text, (uint16_t)strlen(text))) return;
   int i = 0;
   if (app_target_ver >= 3) {
     out_frame[i++] = RESP_CODE_CONTACT_MSG_RECV_V3;
@@ -516,6 +534,8 @@ void MyMesh::queueMessage(const ContactInfo &from, uint8_t txt_type, mesh::Packe
       _mm_store->appendInbound(k, text, (uint16_t)strlen(text), sender_timestamp,
                                 getRTCClock()->getCurrentTime(),
                                 pkt ? pkt->_snr : 0, pathPtr, pathLen);
+      if (_listener && txt_type == TXT_TYPE_PLAIN && mishmesh::isCallBell(text))
+        _listener->onCallBell(from.id.pub_key, from.name, sender_timestamp);
     }
   }
   // [/mishmesh]
@@ -528,7 +548,7 @@ bool MyMesh::filterRecvFloodPacket(mesh::Packet* packet) {
 }
 
 bool MyMesh::allowPacketForward(const mesh::Packet* packet) {
-  return _prefs.isRepeatEn();
+  return !_message_access.restricted() && _prefs.isRepeatEn();
 }
 
 void MyMesh::sendFloodScoped(const TransportKey& scope, mesh::Packet* pkt, uint32_t delay_millis) {
@@ -1247,6 +1267,7 @@ bool MyMesh::mishmeshSendTextImpl(const mishmesh::ConvoKey& k, const char* text,
   if (k.type == 0) {                                     // direct message
     ContactInfo* recipient = lookupContactByPubKey(k.id, 6);
     if (!recipient) return false;
+    if (_mm_retry && _mm_retry->enabled() && !_mm_retry->hasRoom()) return false;
     uint32_t msg_timestamp = getRTCClock()->getCurrentTimeUnique();
     uint32_t expected_ack = 0, est_timeout = 0;
     int result = sendMessage(*recipient, msg_timestamp, 0, text, expected_ack, est_timeout);
@@ -1255,6 +1276,7 @@ bool MyMesh::mishmeshSendTextImpl(const mishmesh::ConvoKey& k, const char* text,
       expected_ack_table[next_ack_idx].msg_sent = _ms->getMillis();
       expected_ack_table[next_ack_idx].ack = expected_ack;
       expected_ack_table[next_ack_idx].contact = recipient;
+      expected_ack_table[next_ack_idx].mm_sender_time = msg_timestamp;
       next_ack_idx = (next_ack_idx + 1) % EXPECTED_ACK_TABLE_SIZE;
     }
     if (_mm_store) {
@@ -1262,6 +1284,7 @@ bool MyMesh::mishmeshSendTextImpl(const mishmesh::ConvoKey& k, const char* text,
                                   getRTCClock()->getCurrentTime(),
                                   expected_ack, _ms->getMillis());
     }
+    if (_mm_retry && _mm_retry->enabled()) _mm_retry->track(k, msg_timestamp, _ms->getMillis(), est_timeout);
     if (senderTimeOut) *senderTimeOut = msg_timestamp;
     return true;
   }
@@ -1293,7 +1316,7 @@ bool MyMesh::mishmeshSendTextImpl(const mishmesh::ConvoKey& k, const char* text,
 // delivery match at. resetPath first clears the contact's route -> next send
 // floods (used after a couple of failed direct attempts).
 bool MyMesh::mishmeshRetransmit(const mishmesh::ConvoKey& k, uint32_t senderTime,
-                                uint8_t attempt, bool resetPath) {
+                                uint8_t attempt, bool resetPath, const uint8_t* scope_key16) {
   if (k.type != 0 || !_mm_store) return false;        // direct messages only
   ContactInfo* recipient = lookupContactByPubKey(k.id, 6);
   if (!recipient) return false;
@@ -1304,12 +1327,19 @@ bool MyMesh::mishmeshRetransmit(const mishmesh::ConvoKey& k, uint32_t senderTime
   if (resetPath) resetPathTo(*recipient);
 
   uint32_t expected_ack = 0, est_timeout = 0;
+  TransportKey prev_scope = send_scope;
+  bool prev_unscoped = send_unscoped;
+  send_unscoped = false;
+  if (scope_key16) memcpy(send_scope.key, scope_key16, sizeof(send_scope.key));
+  else memset(send_scope.key, 0, sizeof(send_scope.key));
   int result = sendMessage(*recipient, senderTime, attempt, text, expected_ack, est_timeout);
+  send_scope = prev_scope; send_unscoped = prev_unscoped;
   if (result == MSG_SEND_FAILED) return false;
   if (expected_ack) {
     expected_ack_table[next_ack_idx].msg_sent = _ms->getMillis();
     expected_ack_table[next_ack_idx].ack = expected_ack;
     expected_ack_table[next_ack_idx].contact = recipient;
+    expected_ack_table[next_ack_idx].mm_sender_time = senderTime;
     next_ack_idx = (next_ack_idx + 1) % EXPECTED_ACK_TABLE_SIZE;
     _mm_store->updateExpectedAck(k, senderTime, expected_ack);
   }
@@ -1362,6 +1392,7 @@ bool MyMesh::onContactPathRecv(ContactInfo& contact, uint8_t* in_path, uint8_t i
 }
 
 void MyMesh::onControlDataRecv(mesh::Packet *packet) {
+  if (_message_access.restricted()) return;
   if (packet->payload_len + 4 > sizeof(out_frame)) {
     MESH_DEBUG_PRINTLN("onControlDataRecv(), payload_len too long: %d", packet->payload_len);
     return;
@@ -1418,6 +1449,7 @@ void MyMesh::onControlDataRecv(mesh::Packet *packet) {
 }
 
 void MyMesh::onRawDataRecv(mesh::Packet *packet) {
+  if (_message_access.restricted()) return;
   if (packet->payload_len + 4 > sizeof(out_frame)) {
     MESH_DEBUG_PRINTLN("onRawDataRecv(), payload_len too long: %d", packet->payload_len);
     return;
@@ -1552,6 +1584,7 @@ MyMesh::MyMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMe
 }
 
 void MyMesh::begin() {
+  _message_access.begin(this, getRNG(), millis());
   BaseChatMesh::begin();
 
   if (!_store->loadMainIdentity(self_id)) {
@@ -1617,7 +1650,8 @@ void MyMesh::begin() {
   resetContacts();
   _store->loadContacts(this);
   bootstrapRTCfromContacts();
-  addChannel("Public", PUBLIC_GROUP_PSK); // pre-configure public channel
+  // Pager builds never seed a public channel. Parents can join explicitly
+  // after disabling restricted messaging with their PIN.
   _store->loadChannels(this);
 
   radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
@@ -1653,6 +1687,7 @@ int8_t MyMesh::uiTxPowerMax() const { return MAX_LORA_TX_POWER; }
 
 // [mishmesh]
 void MyMesh::uiFactoryReset(bool keepIdentity) {
+  if (_message_access.configured() && !_message_access.unlocked(millis())) return;
   bool ok = _store->formatFileSystem();          // wipes both filesystems
   if (ok && keepIdentity) {
     _store->saveMainIdentity(self_id);           // self_id is still in RAM
@@ -1698,6 +1733,27 @@ void MyMesh::startInterface(BaseSerialInterface &serial) {
 }
 
 void MyMesh::handleCmdFrame(size_t len) {
+  if (len == 0) return;
+  // Never expose parent controls through BLE/USB, even while the local parent
+  // screen is unlocked. Reset/key export would also defeat the restriction.
+  if (_message_access.configured() &&
+      (cmd_frame[0] == CMD_FACTORY_RESET || cmd_frame[0] == CMD_EXPORT_PRIVATE_KEY ||
+       cmd_frame[0] == CMD_IMPORT_PRIVATE_KEY)) {
+    writeErrFrame(ERR_CODE_UNSUPPORTED_CMD);
+    return;
+  }
+  if (_message_access.restricted()) {
+    switch (cmd_frame[0]) {
+      case CMD_APP_START: case CMD_DEVICE_QUERY: case CMD_GET_CONTACTS:
+      case CMD_GET_CONTACT_BY_KEY: case CMD_GET_DEVICE_TIME:
+      case CMD_GET_BATT_AND_STORAGE: case CMD_GET_STATS:
+      case CMD_SYNC_NEXT_MESSAGE: case CMD_SEND_TXT_MSG:
+        break;
+      default:
+        writeErrFrame(ERR_CODE_UNSUPPORTED_CMD);
+        return;
+    }
+  }
   if (cmd_frame[0] == CMD_DEVICE_QUERY && len >= 2) { // sent when app establishes connection
     app_target_ver = cmd_frame[1];                    // which version of protocol does app understand
 
@@ -1806,6 +1862,7 @@ void MyMesh::handleCmdFrame(size_t len) {
           expected_ack_table[next_ack_idx].msg_sent = _ms->getMillis(); // add to circular table
           expected_ack_table[next_ack_idx].ack = expected_ack;
           expected_ack_table[next_ack_idx].contact = recipient;
+          expected_ack_table[next_ack_idx].mm_sender_time = 0;
           next_ack_idx = (next_ack_idx + 1) % EXPECTED_ACK_TABLE_SIZE;
         }
 
@@ -2868,6 +2925,7 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
 }
 
 void MyMesh::checkCLIRescueCmd() {
+  if (_message_access.configured()) return;
   int len = strlen(cli_command);
   // `cli_command` must stay NUL-terminated within its bounds. If it ever isn't,
   // strlen() above can return >= sizeof(cli_command) and the loop below would
@@ -3133,6 +3191,7 @@ bool MyMesh::hasPendingWork() const {
 // tracked outbound channel send with that (channelKey, senderTime) exists.
 void MyMesh::logRx(mesh::Packet* pkt, int len, float score) {
   BaseChatMesh::logRx(pkt, len, score);
+  if (_mm_retry) _mm_retry->onRadioActivity(_ms->getMillis());
   if (!_mm_store || !pkt || !pkt->isRouteFlood()) return;
   if (pkt->getPayloadType() != PAYLOAD_TYPE_GRP_TXT) return;
   if (pkt->payload_len < 2) return;
@@ -3160,3 +3219,14 @@ void MyMesh::logRx(mesh::Packet* pkt, int len, float score) {
 #endif
 }
 // [/mishmesh]
+
+void MyMesh::accessPolicyChanged() {
+  // Already queued traffic must not escape after the parent revokes permission.
+  while (_mgr->getOutboundTotal() > 0) {
+    mesh::Packet* p = _mgr->removeOutboundByIdx(0);
+    if (p) releasePacket(p); else break;
+  }
+  offline_queue_len = 0;
+  if (_mm_store) _mm_store->visibilityChanged();
+  if (!_message_access.restricted()) _store->loadChannels(this);
+}
