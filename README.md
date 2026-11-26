@@ -28,14 +28,15 @@ parent-to-child communication.
 - **Questions:** send a prompt such as `?Dinner | Pizza | Pasta`; the child
   chooses an answer and it is sent back to you. The alert shows only the prompt
   and opens the answer choices directly.
-- **Named timers:** send `%Bitte komme in | 5m`. Accepting shows a large
+- **Named timers:** send `%Please come in | 5m`. Accepting shows a large
   countdown, and the alarm shows the original name. The manual Clock timer
   can run at the same time. Chats show the question prompt or timer name.
 - **Remote controls:** designate an approved contact to control parental mode,
   GPS, volume, retries, quick replies, the PIN, and the time zone by direct
   message. GPS controls are unavailable to the child while restrictions are active.
 - **Call bell:** send one `🔔` to ring the pager and show that Dad is calling.
-  The child can reply with `👋 here` from a key press.
+  The child can reply with `👋 here` from a key press. Add
+  `| chime | low` to choose a tone and volume for a bell or timer.
 - **Delivery:** unsent direct messages retry automatically while the route is
   unavailable.
 - **Emoji:** a lightweight monochrome pixel icon set renders the bell and wave

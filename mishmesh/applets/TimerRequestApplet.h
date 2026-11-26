@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mishmesh/core/Applet.h>
+#include <mishmesh/core/AlertSound.h>
 #include <mishmesh/core/MessagesService.h>
 #include <mishmesh/widgets/Marquee.h>
 
@@ -26,10 +27,12 @@ private:
     uint32_t senderTime;
     uint32_t seconds;
     char prompt[161];
+    AlertSound alert;
   };
   enum class State { Idle, Running, Done };
   State _state = State::Idle;
   char _timerName[161]{};
+  AlertSound _timerSound;
   uint32_t _deadline = 0;
   uint32_t _ringStarted = 0;
   uint32_t _lastRing = 0;

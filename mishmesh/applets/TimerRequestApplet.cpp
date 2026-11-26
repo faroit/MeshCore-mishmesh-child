@@ -16,7 +16,7 @@ bool TimerRequestApplet::enqueue(const ConvoKey& key, uint32_t senderTime, const
     if (_requests[i].key.equals(key) && _requests[i].senderTime == senderTime) return true;
   if (_count == 4) return false;
   Request& request = _requests[_count];
-  if (!parseTimerRequest(text, request.prompt, request.seconds)) return false;
+  if (!parseTimerRequest(text, request.prompt, request.seconds, &request.alert)) return false;
   request.key = key;
   request.senderTime = senderTime;
   ++_count;
@@ -76,7 +76,7 @@ int TimerRequestApplet::onRender(Canvas& c) {
       return 0;
     }
     if (_announce && _host->foreground() == this) {
-      if (_sound) _sound->play(sound::SoundId::MsgChime);
+      if (_sound && _requests[0].alert.volume != 0) _sound->play(sound::SoundId::MsgChime);
       _announce = false;
     }
     name = _requests[0].prompt;
@@ -92,10 +92,7 @@ int TimerRequestApplet::onRender(Canvas& c) {
       if (!_ringed) _ringStarted = now;
       _ringed = true;
       _lastRing = now;
-      auto tone = sound::clockToneId(clockService().timerToneIdx());
-      const uint8_t volume = clockService().timerVolume();
-      if (volume) _sound->play(tone, static_cast<sound::VolumeLevel>(volume));
-      else _sound->play(tone);
+      _timerSound.play(*_sound, sound::clockToneId(clockService().timerToneIdx()));
     }
   }
 
@@ -137,6 +134,7 @@ bool TimerRequestApplet::onInput(InputEvent ev) {
   } else if (ev == InputEvent::Select) {
     if (!available()) { advance(); return true; }
     memcpy(_timerName, _requests[0].prompt, sizeof(_timerName));
+    _timerSound = _requests[0].alert;
     _deadline = _host->nowMs() + _requests[0].seconds * 1000u;
     _state = State::Running;
     removeRequest();

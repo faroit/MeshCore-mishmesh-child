@@ -5,7 +5,7 @@
 #include <mishmesh/core/StrUtil.h>
 #include <mishmesh/sound/Sounds.h>
 #include <mishmesh/text/Fonts.h>
-#include <stdio.h>
+
 
 namespace mishmesh {
 bool CallBellApplet::enqueue(const ConvoKey& key, uint32_t time, const char* name) {
@@ -23,13 +23,18 @@ void CallBellApplet::onStart(AppletContext& ctx) {
 }
 void CallBellApplet::onBackground() { if (_sound) _sound->stop(); }
 void CallBellApplet::onStop() { onBackground(); _open = false; }
-bool CallBellApplet::available() const {
+bool CallBellApplet::available(AlertSound* alert) const {
   if (!_count || !_svc) return false;
   const Call& call = _calls[0];
   for (int i = _svc->messageCount(call.key) - 1; i >= 0; --i) {
     MessageView m;
     if (_svc->getMessage(call.key, i, m) && m.kind == KIND_INBOUND &&
-        m.senderTime == call.time && isCallBell(m.text)) return true;
+        m.senderTime == call.time) {
+      AlertSound parsed;
+      if (!parseCallBell(m.text, parsed)) continue;
+      if (alert) *alert = parsed;
+      return true;
+    }
   }
   return false; // deleted or no longer permitted
 }
@@ -41,20 +46,47 @@ void CallBellApplet::advance() {
   else if (_host) _host->requestRender();
 }
 int CallBellApplet::onRender(Canvas& c) {
-  if (!available()) { advance(); return 0; }
+  AlertSound alert;
+  if (!available(&alert)) { advance(); return 0; }
   uint32_t now = c.now();
   if (!_started) { _raisedAt = now; _started = true; }
   _ringing = uint32_t(now - _raisedAt) < 45000;
   if (_ringing && _sound && !_sound->isPlaying() &&
       (!_beeped || uint32_t(now - _lastBeep) >= 3500)) {
     _lastBeep = now; _beeped = true;
-    _sound->play(sound::SoundId::AlarmRing, sound::VolumeLevel::Mid);
+    alert.play(*_sound, sound::SoundId::AlarmRing);
   }
   if (!_ringing && _sound && _sound->isPlaying()) _sound->stop();
-  char title[56]; snprintf(title, sizeof(title), "%s is calling", _calls[0].name);
-  _title.draw(c, fontBody(), 2, 8, c.width() - 4, 18, title, DisplayDriver::LIGHT, now);
-  c.drawText(fontCaption(), c.width() / 2, c.height() - 18, "Press any key: I'm here",
-             DisplayDriver::LIGHT, TextAlign::Center);
+  static const uint8_t bell[] = {
+    0xC0, 0x03, 0xE0, 0x07, 0xF0, 0x0F, 0xF0, 0x0F,
+    0xF0, 0x0F, 0xF0, 0x0F, 0xF8, 0x1F, 0xF8, 0x1F,
+    0xFC, 0x3F, 0xFE, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF,
+    0x00, 0x00, 0xC0, 0x03, 0x80, 0x01,
+  };
+  constexpr auto ink = DisplayDriver::LIGHT;
+  const int center = c.width() / 2;
+  const int width = c.width() - 6;
+  const int divider = c.fontHeight(fontBody()) + 4;
+  c.drawText(fontBody(), 3, 2, "Calling", ink);
+  c.fillRect(3, divider, width, 1, ink);
+
+  const int footer = c.height() - c.fontHeight(fontBody()) - 3;
+  const int bellY = divider + 3;
+  c.drawXbm(center - 8, bellY, bell, 16, 15, ink);
+  const int nameY = bellY + 15;
+  const int nameHeight = footer - nameY;
+  const char* name = _calls[0].name;
+  const auto* font = fontBody();
+  const int maxScale = c.fontHeightScaled(font, 2) <= nameHeight ? 2 : 1;
+  const int scale = c.fitScale(font, name, width, maxScale);
+  if (c.textWidth(font, name) <= width) {
+    const int y = nameY + (nameHeight - c.fontHeightScaled(font, scale)) / 2;
+    c.drawTextScaled(font, center, y, name, ink, scale, TextAlign::Center);
+  } else {
+    _title.draw(c, font, 3, nameY, width, nameHeight, name, ink, now);
+  }
+  c.drawTextEllipsized(fontBody(), center, footer, width, "Press = I'm here",
+                       ink, TextAlign::Center);
   return 250;
 }
 bool CallBellApplet::onInput(InputEvent ev) {

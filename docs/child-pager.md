@@ -85,13 +85,13 @@ The same remote parent can send these direct messages:
 | `!name <name>` | Changes the remote parent's local contact name on the pager. |
 | `!retry on` / `!retry off` | Controls automatic direct message retries. |
 | `!gps on` / `!gps off` | Controls the GPS receiver. The local GPS toggle is unavailable while restrictions are active. |
-| `!sound low\|mid\|high\|mute` | Sets system volume. The child can also adjust volume locally. |
+| `!sound low\|mid\|high\|mute` | Sets system volume, including call bells and message timers. Send one level, for example `!sound low`. The child can also adjust volume locally. |
 
 The pager handles these commands silently.
 
 ## Timer requests
 
-Send `%Bitte komme in | 5m` as a direct message. The pager shows the prompt
+Send `%Please come in | 5m` as a direct message. The pager shows the prompt
 above a large `5:00`. Press Select to start the countdown or Back to dismiss
 the request. When the countdown ends, the pager opens its timer alarm, even
 if the display is asleep.
@@ -105,16 +105,26 @@ Additional message requests wait until the current message timer is dismissed.
 
 ## Call bell
 
-Send a single `🔔` as a direct message. The display wakes, rings, and shows
-**Dad is calling** when the sender is named Dad (other callers use their own
-contact names). Any key queues `👋 here` back to that caller. A failed enqueue
+Send `🔔` as a direct message. The display wakes and shows **Calling**, a
+large bell, and the caller's contact name. Any key queues `👋 here` back to
+that caller. A failed enqueue
 keeps the alert open for another press.
 
 The bell repeats about every 3.5 seconds for up to 45 seconds. After that it
-stops ringing but keeps the prompt; timing out never sends a human reply. Sound
-uses the alarm tone at medium volume, subject to the sound engine's enable and
-category settings. Up to four calls can wait in order; additional bells remain
+stops ringing but keeps the prompt. The default alarm tone follows system
+volume. Up to four calls can wait in order. Additional bells remain
 ordinary messages in history. Each queued call keeps its own reply target.
+
+### Sound for a single alert
+
+Append a tone, a volume, or both to the DM. For example,
+`🔔 | chime | low` uses a quiet chime, and `%Please come in | 5m | ding`
+uses Ding for the expiry alarm. Use `mute` for a visual alert.
+
+Available tones are `ring`, `chime`, `ding`, `arpeggio`, `nokia`, and
+`bigben`. Available volumes are `low`, `mid`, `high`, and `mute`. An
+omitted tone uses the pager's default for that alert. An omitted volume
+follows system volume. System mute silences all of these choices.
 
 ## Delivery
 

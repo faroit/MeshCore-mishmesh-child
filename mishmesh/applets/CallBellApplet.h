@@ -1,5 +1,6 @@
 #pragma once
 #include <mishmesh/core/Applet.h>
+#include <mishmesh/core/AlertSound.h>
 #include <mishmesh/core/MessagesService.h>
 #include <mishmesh/widgets/Marquee.h>
 
@@ -28,7 +29,7 @@ private:
   MessagesService* _svc = nullptr;
   sound::SoundEngine* _sound = nullptr;
   Marquee _title;
-  bool available() const;
+  bool available(AlertSound* alert = nullptr) const;
   void advance();
 };
 CallBellApplet& callBellApplet();

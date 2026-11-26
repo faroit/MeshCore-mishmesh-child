@@ -286,7 +286,9 @@ public:
   }
   uint16_t batteryMillivoltsLive() const override { return getBattMilliVolts(); }
   void setSoundVolume(uint8_t level) override {
-    _sound.setVolume((mishmesh::sound::VolumeLevel)level);
+    const auto volume = static_cast<mishmesh::sound::VolumeLevel>(level);
+    _sound.setVolume(volume);
+    if (volume == mishmesh::sound::VolumeLevel::Mute) _sound.stop();
     NodePrefs* p = the_mesh.getNodePrefs();
     if (!p) return;
     p->sound_volume = level;

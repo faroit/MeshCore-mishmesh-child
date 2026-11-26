@@ -1,5 +1,6 @@
 #include <mishmesh/applets/TimerRequestApplet.h>
 #include <mishmesh/applets/CallBellApplet.h>
+#include <mishmesh/core/CallBell.h>
 #include <mishmesh/core/PixelEmoji.h>
 #include <mishmesh/core/Question.h>
 #include "UITask.h"
@@ -404,6 +405,7 @@ void UITask::onMessageRecv(mesh::Packet* /*pkt*/, const ContactInfo& from, uint8
   if (txt_type == TXT_TYPE_CLI_DATA) { _cliReplies.latch(from.id.pub_key, text); return; }
   if (!(txt_type == TXT_TYPE_PLAIN || txt_type == TXT_TYPE_SIGNED_PLAIN)) return;
   _msgFlushAt = millis() + 8000;
+  if (_host && txt_type == TXT_TYPE_PLAIN && mishmesh::isCallBell(text)) return;
   if (_host && txt_type == TXT_TYPE_PLAIN && from.type == ADV_TYPE_CHAT &&
       the_mesh.isContactAllowed(from) &&
       mishmesh::timerRequestApplet().enqueue(mishmesh::directKey(from.id.pub_key),
@@ -460,7 +462,11 @@ bool UITask::onParentCommand(const ContactInfo& from, uint32_t timestamp, const 
       break;
     case Sound: {
       static const char* levels[] = {"mute", "low", "mid", "high"};
-      while (volume < 4 && strcmp(args, levels[volume]) != 0) ++volume;
+      const size_t length = strcspn(args, " \t\r\n");
+      if (args[length + strspn(args + length, " \t\r\n")]) return true;
+      while (volume < 4 &&
+             (strlen(levels[volume]) != length || strncasecmp(args, levels[volume], length) != 0))
+        ++volume;
       if (volume == 4) return true;
       break;
     }

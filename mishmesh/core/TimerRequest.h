@@ -1,12 +1,14 @@
 #pragma once
 
 #include <mishmesh/core/ClockService.h>
+#include <mishmesh/core/AlertSound.h>
 #include <string.h>
 
 namespace mishmesh {
 
 // A single positive duration in seconds, minutes or hours.
-inline bool parseTimerRequest(const char* text, char (&prompt)[161], uint32_t& seconds) {
+inline bool parseTimerRequest(const char* text, char (&prompt)[161], uint32_t& seconds,
+                              AlertSound* alert = nullptr) {
   const auto space = [](char c) { return c == ' ' || c == '\t'; };
   if (!text || *text != '%' || strlen(text) > 160) return false;
   const char* start = text + 1;
@@ -32,8 +34,9 @@ inline bool parseTimerRequest(const char* text, char (&prompt)[161], uint32_t& s
     case 'h': unit = 3600; break;
     default: return false;
   }
-  while (space(*duration)) ++duration;
-  if (*duration || value > ClockService::TIMER_MAX_SECS / unit) return false;
+  AlertSound parsed;
+  if (value > ClockService::TIMER_MAX_SECS / unit || !parseAlertSound(duration, parsed)) return false;
+  if (alert) *alert = parsed;
   seconds = value * unit;
   memcpy(prompt, start, end - start);
   prompt[end - start] = 0;
