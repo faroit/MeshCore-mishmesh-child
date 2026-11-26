@@ -65,6 +65,30 @@ Use two to six nonempty choices within MeshCore's 160-byte message limit. Spaces
 around the prompt and answers are trimmed; UTF-8 text is preserved. Malformed
 questions remain ordinary messages. Only direct messages are interpreted.
 
+## Remote lock and unlock
+
+Enter the PIN in **Apps → Parent controls**. Highlight an approved contact
+and press Right to designate it as the remote parent. The entry starts with
+**Remote**. Press Right on that entry again to turn remote control off.
+
+From that contact, send `!parent lock` to enable restricted messaging or
+`!parent unlock` to disable it. Use a direct message. These commands change
+the mode without opening the PIN-protected settings.
+
+The same remote parent can send these direct messages:
+
+| Command | Effect |
+| --- | --- |
+| `!pin <old> <new>` | Changes the six-digit parent PIN. The sending app may retain both PINs in its sent history. |
+| `!tz <minutes>` | Sets a fixed UTC offset in 15-minute increments, from −720 to +840. |
+| `!preset <n> <text>` | Updates quick reply n or appends at the next available slot, up to 10. Omit the text to remove that entry and shift later entries up. |
+| `!name <name>` | Changes the remote parent's local contact name on the pager. |
+| `!retry on` / `!retry off` | Controls automatic direct message retries. |
+| `!gps on` / `!gps off` | Controls the GPS receiver. The local GPS toggle is unavailable while restrictions are active. |
+| `!sound low\|mid\|high\|mute` | Sets system volume. The child can also adjust volume locally. |
+
+The pager handles these commands silently.
+
 ## Timer requests
 
 Send `%Bitte komme in | 5m` as a direct message. The pager shows the prompt
@@ -73,7 +97,11 @@ the request. When the countdown ends, the pager opens its timer alarm, even
 if the display is asleep.
 
 Use a whole number followed by `s`, `m`, or `h` (up to eight hours).
-An active or paused timer must be cleared before accepting a new request.
+The text before the separator is the timer name. After Select, the pager
+keeps the name and large countdown on screen. Back hides the countdown
+while it runs, so you can start a separate manual timer in **Clock**.
+When the message timer finishes, the pager shows its name with **Time's up!**.
+Additional message requests wait until the current message timer is dismissed.
 
 ## Call bell
 

@@ -1,8 +1,10 @@
+# MishmeshChild
+
 <p align="center">
   <img src="mishmesh/docs/img/logo.png" alt="mishmesh" width="420">
 </p>
 
-<p align="center"><b>Standalone companion firmware for MeshCore radios.</b></p>
+<p align="center"><b>A standalone MeshCore pager for kids.</b></p>
 
 <p align="center">
   <a href='https://ko-fi.com/W3V222VPDT' target='_blank'><img height='36' style='border:0px;height:36px;' src='https://storage.ko-fi.com/cdn/kofi6.png?v=6' border='0' alt='Buy Me a Coffee at ko-fi.com' /></a>
@@ -16,13 +18,22 @@ device. mishmesh provides the on-device messaging interface, contacts, keypad,
 and settings; the child-companion inspired additions focus on simple
 parent-to-child communication.
 
-### Child pager changes
+### Child pager features
 
 - **Parent controls:** a PIN-protected allowlist controls who can message the
   child. Unknown contacts and public channels are blocked while restrictions
   are enabled.
+- **Home:** press Left for Messages or Right for the latest approved chat.
+  The chat opens at its newest unread message when one is available.
 - **Questions:** send a prompt such as `?Dinner | Pizza | Pasta`; the child
-  chooses an answer and it is sent back to you.
+  chooses an answer and it is sent back to you. The alert shows only the prompt
+  and opens the answer choices directly.
+- **Named timers:** send `%Bitte komme in | 5m`. Accepting shows a large
+  countdown, and the alarm shows the original name. The manual Clock timer
+  can run at the same time. Chats show the question prompt or timer name.
+- **Remote controls:** designate an approved contact to control parental mode,
+  GPS, volume, retries, quick replies, the PIN, and the time zone by direct
+  message. GPS controls are unavailable to the child while restrictions are active.
 - **Call bell:** send one `🔔` to ring the pager and show that Dad is calling.
   The child can reply with `👋 here` from a key press.
 - **Delivery:** unsent direct messages retry automatically while the route is
@@ -33,14 +44,8 @@ parent-to-child communication.
 See [child pager setup and behavior](docs/child-pager.md). Messaging starts
 restricted; configure **Apps → Parent controls** before use.
 
-It targets the Seeed Wio Tracker L1 / L1 Pro (128x64 OLED), the Wio Tracker
-L1 E-Ink (2.13", 250x122), which also gets portrait orientation, a larger
-interface size, and a face left on the glass while the panel sleeps, and the
-GAT562 30S Mesh Kit (128x64 OLED, with the joystick and buzzer populated).
-In theory we can support more devices with enough buttons.
-
-The underlying MeshCore firmware is mostly unchanged; see [About MeshCore](#about-meshcore)
-below.
+MishmeshChild builds for the Seeed Wio Tracker L1 / L1 Pro with a 128×64 OLED.
+The screenshots below show the inherited Mishmesh interface.
 
 ### Screens
 
@@ -95,14 +100,12 @@ below.
 
 ### Install
 
-Grab the latest `.uf2` for your board from [Releases](../../releases) -
-`WioTrackerL1_companion_radio_*_mishmesh_mm-*.uf2` for the OLED board,
-`WioTrackerL1Eink_companion_radio_*_mishmesh_mm-*.uf2` for the e-ink one,
-`GAT562_30S_Mesh_Kit_companion_radio_*_mishmesh_mm-*.uf2` for the GAT562 - then:
+Download the `MishmeshChild-v*_WioTrackerL1_companion_radio_*_mishmesh-child_*.uf2`
+for your connection type from [Releases](../../releases), or build it from source.
 
 1. Plug the board into USB.
 2. Double-tap reset. It mounts as a USB drive.
-3. Drop the `.uf2` onto it. It reboots into mishmesh.
+3. Drop the `.uf2` onto it. It reboots into MishmeshChild.
 
 The `ble` build pairs with the phone/web app over Bluetooth; the `usb` build
 talks over USB serial. Either way the device is fully usable on its own.
@@ -114,31 +117,35 @@ Or [build it yourself](#building-from-source).
 A PlatformIO project. With the repo cloned:
 
 ```sh
-export FIRMWARE_VERSION=mishmesh-dev
 pio run -e WioTrackerL1_companion_radio_usb_mishmesh-child -t upload   # or _ble_mishmesh-child
 ```
-
-On the e-ink board swap `WioTrackerL1_` for `WioTrackerL1Eink_` in the env name,
-on the GAT562 for `GAT562_30S_Mesh_Kit_`.
 
 Package the `.uf2` / `.zip` like a release does (lands in `out/`):
 
 ```sh
-export FIRMWARE_VERSION=mishmesh-dev
-FIRMWARE_VERSION=v1.7.0c sh build.sh build-firmware WioTrackerL1_companion_radio_ble_mishmesh-child
+sh build.sh build-firmware WioTrackerL1_companion_radio_ble_mishmesh-child
 ```
+
+### Maintaining the fork
+
+MishmeshChild uses its own version from `mishmesh/ChildVersion.h`. The boot
+splash and About screen identify the fork and its Mishmesh base. The firmware
+filename includes all three versions and the build commit.
+
+Keep the fork's `upstream` branch at the selected unmodified Mishmesh release.
+Fetch new releases from [upstream Mishmesh](https://github.com/burakcan/MeshCore-mishmesh),
+fast-forward `upstream` to the chosen tag, and merge that branch into the
+fork's `main`. Build the BLE child target before tagging the next MishmeshChild
+release as `child-vX.Y.Z`. Attach the packaged firmware from `out/` when
+creating the GitHub release and record the exact upstream tag and commit
+in its notes. The v0.1.0 base is Mishmesh `mishmesh-v1.7.0` (`1809e674`).
 
 ### Emoji
 
-Emoji use the [EmojiMania](https://idanro.itch.io/emojimania) glyph set - a
-purchased license that doesn't allow redistributing the art, so the glyphs live
-outside this repository. Official release builds compile them in. Building from
-source, or any fork, is fully supported and looks identical, except emoji render
-as a placeholder block instead of the glyph.
-
-If you own EmojiMania, you can build with emoji yourself: drop your sheet in and
-run the generator per
-[`mishmesh/text/emoji-tools/README.md`](./mishmesh/text/emoji-tools/README.md).
+Source builds include a monochrome emoji set based on
+[Shuqi Khor’s Pixel Icons](https://github.com/shuqikhor/pixel-icons).
+An optional local EmojiMania overlay is described in the
+[emoji build guide](docs/mishmesh-emoji-overlay.md).
 
 ### How mishmesh fits
 

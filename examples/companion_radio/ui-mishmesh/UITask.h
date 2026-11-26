@@ -116,6 +116,7 @@ class UITask : public AbstractUITask, public mishmesh::AppServices, public mishm
     mishmesh::WakeOverride chatWake(const mishmesh::ConvoKey& k) const override;
     void setChatWake(const mishmesh::ConvoKey& k, mishmesh::WakeOverride v) override;
     mishmesh::MessagesConfig getMessagesConfig() const override;
+    void setRemoteRetry(bool enabled);
     void setMessagesConfig(const mishmesh::MessagesConfig& cfg) override;
     mishmesh::ChanResult createPrivateChannel(const char* name) override;
     mishmesh::ChanResult joinPrivateChannel(const char* name, const char* keyHex) override;
@@ -466,12 +467,18 @@ public:
     const char* v = _sensors ? _sensors->getSettingByKey("gps") : nullptr;
     return v && strcmp(v, "1") == 0;
   }
+  bool gpsControlAllowed() const override { return !the_mesh.messageAccess().restricted(); }
   void setGpsEnabled(bool on) override {
-    if (!_sensors) return;
+    if (gpsControlAllowed()) applyGpsEnabled(on);
+  }
+private:
+  void applyGpsEnabled(bool on) {
+    if (!gpsSupported()) return;
     _sensors->setSettingValue("gps", on ? "1" : "0");
     NodePrefs* p = the_mesh.getNodePrefs();     // persist like ui-tiny does
     if (p) { p->gps_enabled = on ? 1 : 0; the_mesh.savePrefs(); }
   }
+public:
   bool gpsHasFix() const override {
     LocationProvider* lp = _sensors ? _sensors->getLocationProvider() : nullptr;
     return lp && gpsEnabled() && lp->isValid();
@@ -551,6 +558,7 @@ public:
   void notify(UIEventType t = UIEventType::none) override;
   void onRoomLogin(const uint8_t* pubkey, bool success, bool is_admin, uint8_t perms) override;
   void loop() override;
+  bool onParentCommand(const ContactInfo& from, uint32_t timestamp, const char* text) override;
   void onCallBell(const uint8_t* key, const char* name, uint32_t time) override;
 
 private:

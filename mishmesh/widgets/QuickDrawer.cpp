@@ -26,7 +26,7 @@ void QuickDrawer::rebuildTiles() {
   // A null app (host tests) keeps every tile so the fixture stays simple.
   if (!_app || _app->bleSupported()) _tiles[_ntiles++] = Ble;
   _tiles[_ntiles++] = Sound;
-  _tiles[_ntiles++] = Gps;
+  if (!_app || _app->gpsControlAllowed()) _tiles[_ntiles++] = Gps;
   _tiles[_ntiles++] = Advert;
   _tiles[_ntiles++] = Theme;
 }
@@ -105,7 +105,7 @@ void QuickDrawer::activate(bool longPress) {
       cycleSoundVolume(_app, _sound, _host);   // same path as the Sound settings panel
       break;
     case Gps:
-      if (!_app) break;
+      if (!_app || !_app->gpsControlAllowed()) break;
       if (!_app->gpsSupported()) { if (_host) _host->postToast("No GPS"); break; }
       _app->setGpsEnabled(!_app->gpsEnabled());
       break;

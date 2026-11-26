@@ -15,6 +15,7 @@ public:
     uint8_t enabled, count, reserved[2];
     uint8_t salt[16], pinHash[32];
     uint8_t keys[MAX_ALLOWED][32];
+    uint32_t remoteTimestamp;
     uint8_t checksum[32];
   };
   class Storage {
@@ -41,6 +42,10 @@ public:
   bool setPin(const char* pin, uint32_t now);
   bool setRestricted(bool enabled, uint32_t now);
   bool setAllowed(const uint8_t* key, bool allowed, uint32_t now);
+  bool isRemoteParent(const uint8_t* key) const;
+  bool toggleRemoteParent(int index, uint32_t now);
+  bool applyRemote(const uint8_t* key, bool restricted, uint32_t timestamp);
+  bool claimRemoteCommand(const uint8_t* key, uint32_t timestamp);
   uint32_t revision() const { return _revision; }
 
 private:
@@ -49,5 +54,5 @@ private:
   mesh::RNG* _rng = nullptr;
   bool _configured = false, _fault = false, _unlocked = false;
   uint32_t _unlockUntil = 0, _attemptAt = 0, _revision = 0;
-  bool commit(Record& next);
+  bool commit(Record& next, bool notify = true);
 };

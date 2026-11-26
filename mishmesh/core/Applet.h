@@ -133,6 +133,7 @@ struct AppServices {
   virtual void    setDateFormat(uint8_t) {}
   // GPS power. Defaults keep the framework companion-agnostic (unsupported);
   // the adapter overrides these against the SensorManager "gps" setting.
+  virtual bool gpsControlAllowed() const { return true; }
   virtual bool gpsSupported() const { return false; }
   virtual bool gpsEnabled()   const { return false; }
   virtual void setGpsEnabled(bool) {}

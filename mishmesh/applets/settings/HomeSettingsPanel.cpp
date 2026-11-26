@@ -3,6 +3,7 @@
 #include <mishmesh/core/AppletHost.h>
 #include <mishmesh/core/AppletRegistry.h>
 #include <mishmesh/core/Canvas.h>
+#include <helpers/MessageAccessPolicy.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -10,10 +11,12 @@ namespace mishmesh {
 
 // --- QuickActionPickerPanel ---
 
-void QuickActionPickerPanel::begin(AppletContext&) {
+void QuickActionPickerPanel::begin(AppletContext& ctx) {
+  const auto* access = ctx.app ? ctx.app->messageAccess() : nullptr;
   _count = 0;   // same order-sorted collection as the app menu
   for (const AppletRegistration* r = registeredApplets(); r; r = r->next) {
     if (r->placement != Placement::AppMenu || _count >= MAX_ENTRIES) continue;
+    if (access && access->restricted() && strcmp(r->label, "2048") == 0) continue;
     int i = _count++;
     while (i > 0 && _entries[i - 1]->order > r->order) {
       _entries[i] = _entries[i - 1];

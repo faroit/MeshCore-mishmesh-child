@@ -60,7 +60,7 @@ const char* ParentControlsApplet::label(int i) const {
     }
   }
   snprintf(_label, sizeof(_label), "%s%.32s [%02X%02X%02X%02X]",
-           _adding ? (_policy->contains(key) ? "Allowed: " : "Add: ") : "Remove: ",
+           _adding ? (_policy->contains(key) ? "Allowed: " : "Add: ") : (_policy->isRemoteParent(key) ? "Remote: " : "Allowed: "),
            name, key[28], key[29], key[30], key[31]);
   return _label;
 }
@@ -121,6 +121,13 @@ bool ParentControlsApplet::onInput(InputEvent ev) {
     return true;
   }
   if (ev == InputEvent::Back && _adding) { showMenu(); return true; }
+  if (!_adding && ev == InputEvent::NavRight && _list.selected() >= 4) {
+    const int index = _list.selected() - 4;
+    bool saved = _policy->toggleRemoteParent(index, now());
+    if (_host) _host->postToast(!saved ? "Not saved" :
+        _policy->isRemoteParent(_policy->keyAt(index)) ? "Remote parent set" : "Remote parent off");
+    return true;
+  }
   if (_list.onInput(ev)) return true;
   if (ev != InputEvent::Select) return false;
   int row = _list.selected();

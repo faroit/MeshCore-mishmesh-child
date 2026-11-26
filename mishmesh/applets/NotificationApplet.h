@@ -22,6 +22,11 @@ public:
   void onForeground() override;
   int  onRender(Canvas& c) override;
   bool onInput(InputEvent ev) override;
+  bool isOpen() const { return _open; }
+  bool showingQuestion() const { return _open && _question; }
+  bool keepOnWake() const override { return _question; }
+  bool wakePressCounts() const override { return _question; }
+  void onStop() override { _open = false; }
   bool isOverlay() const override { return true; }
 
   // test seams
@@ -34,6 +39,9 @@ private:
   AppletHost*      _host = nullptr;
   MessagesService* _svc  = nullptr;
   ConvoKey         _key{};
+  bool             _open = false;
+  bool             _question = false;
+  uint32_t         _questionTime = 0;
   bool             _isChannel = false;
   uint16_t         _otherUnread = 0;     // other chats (not _key) still unread
   uint32_t         _raisedAt = 0;        // 0 => stamp on next render (auto-dismiss base)

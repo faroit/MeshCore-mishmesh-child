@@ -112,6 +112,7 @@ public:
       virtual void onTraceRecv(mesh::Packet *pkt, uint32_t tag, uint32_t auth_code, uint8_t flags,
                                const uint8_t *path_snrs, const uint8_t *path_hashes, uint8_t path_len) { }
       virtual void onRawDataRecv(mesh::Packet *pkt) { }
+      virtual bool onParentCommand(const ContactInfo&, uint32_t, const char*) { return false; }
       virtual void onCallBell(const uint8_t* key, const char* name, uint32_t timestamp) { }
       // [mishmesh] Result of a room/repeater login started on-device. `perms` are
       // the server's ACL permission bits (0 = guest/read-only).

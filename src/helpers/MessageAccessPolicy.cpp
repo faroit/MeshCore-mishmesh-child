@@ -4,7 +4,7 @@
 #include <stddef.h>
 
 namespace {
-const uint8_t MAGIC[4] = {'M', 'A', 'P', 1};
+const uint8_t MAGIC[4] = {'M', 'A', 'P', 2};
 bool validPin(const char* pin) {
   if (!pin || strlen(pin) != 6) return false;
   for (int i = 0; i < 6; ++i) if (pin[i] < '0' || pin[i] > '9') return false;
@@ -12,7 +12,8 @@ bool validPin(const char* pin) {
 }
 void checksum(const MessageAccessPolicy::Record& r, uint8_t* out) {
   mesh::Utils::sha256(out, 32, reinterpret_cast<const uint8_t*>(&r),
-                      offsetof(MessageAccessPolicy::Record, checksum));
+                      r.magic[3] == 1 ? offsetof(MessageAccessPolicy::Record, remoteTimestamp)
+                                      : offsetof(MessageAccessPolicy::Record, checksum));
 }
 }
 
@@ -23,7 +24,10 @@ void MessageAccessPolicy::begin(Storage* storage, mesh::RNG* rng, uint32_t now) 
   int result = storage ? storage->loadAccessPolicy(_record) : -1;
   if (result != 0) {
     uint8_t hash[32]; checksum(_record, hash);
-    _fault = result != 1 || memcmp(_record.magic, MAGIC, 4) != 0 ||
+    _fault = result != 1 || memcmp(_record.magic, MAGIC, 3) != 0 ||
+             (_record.magic[3] != 1 && _record.magic[3] != MAGIC[3]) ||
+             _record.reserved[0] > _record.count ||
+             (_record.magic[3] == 1 && (_record.reserved[0] || _record.remoteTimestamp)) ||
              _record.enabled > 1 || _record.count > MAX_ALLOWED ||
              memcmp(hash, _record.checksum, 32) != 0;
     _configured = true;
@@ -61,13 +65,14 @@ bool MessageAccessPolicy::unlock(const char* pin, uint32_t now) {
   _unlockUntil = now + 120000;
   return true;
 }
-bool MessageAccessPolicy::commit(Record& next) {
+bool MessageAccessPolicy::commit(Record& next, bool notify) {
+  memcpy(next.magic, MAGIC, sizeof(MAGIC));
   checksum(next, next.checksum);
   if (!_storage || !_storage->saveAccessPolicy(next)) return false;
   _record = next;
   _configured = true;
   ++_revision;
-  _storage->accessPolicyChanged();
+  if (notify) _storage->accessPolicyChanged();
   return true;
 }
 bool MessageAccessPolicy::setPin(const char* pin, uint32_t now) {
@@ -100,9 +105,44 @@ bool MessageAccessPolicy::setAllowed(const uint8_t* key, bool allowed, uint32_t 
     memcpy(next.keys[next.count++], key, 32);
   } else {
     if (i == next.count) return true;
+    if (next.reserved[0] == i + 1) {
+      next.reserved[0] = 0;
+    } else if (next.reserved[0] > i + 1) {
+      --next.reserved[0];
+    }
     --next.count;
     memmove(next.keys[i], next.keys[i + 1], (next.count - i) * 32);
     memset(next.keys[next.count], 0, 32);
   }
   return commit(next);
+}
+
+bool MessageAccessPolicy::isRemoteParent(const uint8_t* key) const {
+  const int index = _record.reserved[0] - 1;
+  const uint8_t* parent = keyAt(index);
+  return _configured && key && parent && memcmp(parent, key, 32) == 0;
+}
+
+bool MessageAccessPolicy::toggleRemoteParent(int index, uint32_t now) {
+  if (!unlocked(now) || !keyAt(index)) return false;
+  Record next = _record;
+  next.reserved[0] = next.reserved[0] == index + 1 ? 0 : index + 1;
+  return commit(next);
+}
+
+bool MessageAccessPolicy::applyRemote(const uint8_t* key, bool restricted, uint32_t timestamp) {
+  if (!isRemoteParent(key) || timestamp <= _record.remoteTimestamp) return false;
+  Record next = _record;
+  next.enabled = restricted;
+  next.remoteTimestamp = timestamp;
+  if (!commit(next)) return false;
+  lock();
+  return true;
+}
+
+bool MessageAccessPolicy::claimRemoteCommand(const uint8_t* key, uint32_t timestamp) {
+  if (!isRemoteParent(key) || timestamp <= _record.remoteTimestamp) return false;
+  Record next = _record;
+  next.remoteTimestamp = timestamp;
+  return commit(next, false);
 }

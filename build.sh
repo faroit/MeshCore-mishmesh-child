@@ -151,15 +151,16 @@ build_firmware() {
       MM_VER="${MM_VER:-v0.0.0}"
       MC_VER="${MC_VER:-v0.0.0}"
 
-      # Keep child builds' explicit version readable on the About screen.
-      # Other mishmesh artifacts retain the commit suffix used by releases.
-      case "$1" in
-        *_mishmesh-child) FIRMWARE_VERSION_STRING="$MC_VER" ;;
-        *) FIRMWARE_VERSION_STRING="${MC_VER}-${COMMIT_HASH}" ;;
-      esac
-
-      # e.g: WioTrackerL1_companion_radio_ble_mishmesh_mm-v1.0.0_mc-v1.16.0-SHA
+      FIRMWARE_VERSION_STRING="${MC_VER}-${COMMIT_HASH}"
       FIRMWARE_FILENAME="$1_mm-${MM_VER}_mc-${MC_VER}-${COMMIT_HASH}"
+      case "$1" in
+        *_mishmesh-child)
+          CHILD_VER="$(read_header_define mishmesh/ChildVersion.h MISHMESH_CHILD_VERSION)"
+          [ -n "$CHILD_VER" ] || return 1
+          FIRMWARE_VERSION_STRING="$MC_VER"
+          FIRMWARE_FILENAME="MishmeshChild-${CHILD_VER}_$1_mm-${MM_VER}_mc-${MC_VER}-${COMMIT_HASH}"
+          ;;
+      esac
 
       export PLATFORMIO_BUILD_FLAGS="${PLATFORMIO_BUILD_FLAGS} -DFIRMWARE_BUILD_DATE='\"${FIRMWARE_BUILD_DATE}\"' -DFIRMWARE_VERSION='\"${FIRMWARE_VERSION_STRING}\"' -DMISHMESH_VERSION='\"${MM_VER}\"'"
       ;;

@@ -1,10 +1,12 @@
 // mishmesh/applets/NotificationApplet.cpp
 #include "NotificationApplet.h"
 #include "MessageThreadApplet.h"
+#include "QuestionApplet.h"
 #include <mishmesh/core/AppletHost.h>
 #include <mishmesh/core/Canvas.h>
 #include <mishmesh/core/Metrics.h>
 #include <mishmesh/core/Question.h>
+#include <mishmesh/core/TimerRequest.h>
 #include <mishmesh/text/Fonts.h>
 #include <cstdio>
 
@@ -13,6 +15,7 @@ namespace mishmesh {
 static const uint32_t AUTO_MS = 8000;   // auto-dismiss when left untouched
 
 void NotificationApplet::raise(MessagesService* svc, const ConvoKey& key) {
+  _question = false;
   _svc = svc;
   _key = key;
   _name[0] = _sender[0] = _preview[0] = 0;
@@ -43,7 +46,15 @@ void NotificationApplet::raise(MessagesService* svc, const ConvoKey& key) {
       const char* preview = m.text ? m.text : "";
       Question question;
       if (key.type == 0 && !m.outbound && m.kind == KIND_INBOUND &&
-          parseQuestion(preview, question)) preview = question.prompt();
+          parseQuestion(preview, question)) {
+        _question = true;
+        _questionTime = m.senderTime;
+        preview = question.prompt();
+      }
+      char timerName[161];
+      uint32_t seconds;
+      if (!_question && key.type == 0 && !m.outbound && m.kind == KIND_INBOUND &&
+          parseTimerRequest(preview, timerName, seconds)) preview = timerName;
       snprintf(_preview, sizeof(_preview), "%s", preview);
       if (m.senderName) snprintf(_sender, sizeof(_sender), "%s", m.senderName);
     }
@@ -51,6 +62,7 @@ void NotificationApplet::raise(MessagesService* svc, const ConvoKey& key) {
 }
 
 void NotificationApplet::onStart(AppletContext& ctx) {
+  _open = true;
   _host = ctx.host;
   if (!_svc) _svc = ctx.messages;   // raise() normally sets it first
   _raisedAt = 0;
@@ -61,7 +73,7 @@ void NotificationApplet::onForeground() { _raisedAt = 0; }   // restart timer wh
 int NotificationApplet::onRender(Canvas& c) {
   uint32_t now = c.now();
   if (_raisedAt == 0) _raisedAt = now ? now : 1;
-  if (now - _raisedAt >= AUTO_MS) { if (_host) _host->pop(); return 0; }
+  if (!_question && now - _raisedAt >= AUTO_MS) { if (_host) _host->pop(); return 0; }
 
   // The host renders the covered screen first (isOverlay), so dim it with a
   // scrim and paint only the card. Inset enough that the background shows;
@@ -80,7 +92,7 @@ int NotificationApplet::onRender(Canvas& c) {
   int fb = card.fontHeight(fontBody());  if (fb <= 0) fb = 8;
   int hIcon = (uint16_t)(_isChannel ? Icon::Users : Icon::Message);
   card.drawGlyph(iconFont(), 3, 1 + (HDR - 1 - gh) / 2, (uint16_t)hIcon, DisplayDriver::DARK);
-  const char* hdr = (_isChannel && _name[0]) ? _name : "New message";
+  const char* hdr = (_isChannel && _name[0]) ? _name : (_question ? "Question" : "New message");
   card.drawTextEllipsized(fontBody(), 18, 1 + (HDR - 1 - fb) / 2, W - 18 - 8, hdr, DisplayDriver::DARK);
   card.drawText(fontBody(), W - 4, 1 + (HDR - 1 - fb) / 2, ">", DisplayDriver::DARK, TextAlign::Right);
 
@@ -113,7 +125,10 @@ int NotificationApplet::onRender(Canvas& c) {
   }
 
   card.fillStipple(3, footY - 2, W - 6, 1, DisplayDriver::LIGHT);
-  if (_otherUnread > 0) {
+  if (_question) {
+    card.drawTextEllipsized(footFont, 3, footY + (FOOT - cap) / 2, W - 6,
+                            "OK: answer  Back: dismiss", DisplayDriver::LIGHT);
+  } else if (_otherUnread > 0) {
     char b[24];
     snprintf(b, sizeof(b), "%u more unread", (unsigned)_otherUnread);
     card.drawGlyph(iconFont(), 3, footY + (FOOT - gh) / 2, (uint16_t)Icon::Mail, DisplayDriver::LIGHT);
@@ -124,17 +139,32 @@ int NotificationApplet::onRender(Canvas& c) {
 
   card.drawRoundRect(0, 0, W, H, DisplayDriver::LIGHT);   // rounded outer frame on top
 
+  if (_question) return 1000;
   uint32_t shown = now - _raisedAt;
   return (int)(shown < AUTO_MS ? AUTO_MS - shown : 0);   // wake to auto-dismiss
 }
 
 bool NotificationApplet::onInput(InputEvent ev) {
   if (ev == InputEvent::Select || ev == InputEvent::SelectLong) {
+    if (_question) {
+      if (_host && _svc) {
+        for (int i = _svc->messageCount(_key) - 1; i >= 0; --i) {
+          MessageView message;
+          if (_svc->getMessage(_key, i, message) && message.senderTime == _questionTime &&
+              questionApplet().setQuestion(_key, message, _name)) {
+            _host->replace(&questionApplet());
+            return true;
+          }
+        }
+        _host->postToast("Question unavailable");
+      }
+      return true;
+    }
     messageThreadApplet().setTarget(_key);
     if (_host) _host->replace(&messageThreadApplet());   // banner -> chat, in place
     return true;
   }
-  if (ev == InputEvent::Back || ev == InputEvent::Cancel) return false;  // bubble -> host pops (dismiss)
+  if (ev == InputEvent::Back || (!_question && ev == InputEvent::Cancel)) return false;  // bubble -> host pops (dismiss)
   return true;   // modal: swallow nav etc. so stray presses don't leak through
 }
 

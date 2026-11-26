@@ -14,12 +14,14 @@ class AppMenuApplet : public Applet, public ListModel {
   int _count;
   IconGrid _grid;
   AppletHost* _host;
+  AppServices* _app = nullptr;
   // unread badge: pointer to messages service, set in onStart
   struct MessagesService* _ctx_messages = nullptr;
 public:
   AppMenuApplet() : Applet("Apps"), _count(0), _host(nullptr) {}
 
   void onStart(AppletContext& ctx) override;
+  void onForeground() override;
   int onRender(Canvas& c) override;
   bool onInput(InputEvent ev) override;
 

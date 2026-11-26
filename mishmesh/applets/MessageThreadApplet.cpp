@@ -14,6 +14,7 @@
 #include <mishmesh/core/TimeFormat.h>
 #include <mishmesh/widgets/Modal.h>
 #include <mishmesh/core/QuickReplyStore.h>
+#include <mishmesh/core/TimerRequest.h>
 #include <cstdio>
 #include <cstring>
 
@@ -104,7 +105,20 @@ void MessageThreadApplet::onStart(AppletContext& ctx) {
   _animReady = false;   // snap (no slide-in) on the opening frame
   _pinBottom = true;    // first render scrolls to the newest message
   _pinFocusTop = false;
-  if (_svc && n > 0 && _svc->getMessagesConfig().openAtUnread) {
+  if (_newestUnreadOnOpen) {
+    _newestUnreadOnOpen = false;
+    if (_svc && unreadCount() > 0) {
+      for (int i = n - 1; i >= 0; --i) {
+        MessageView message;
+        if (_svc->getMessage(_key, i, message) && !message.outbound) {
+          _focus = i;
+          _pinBottom = false;
+          _pinFocusTop = true;
+          break;
+        }
+      }
+    }
+  } else if (_svc && n > 0 && _svc->getMessagesConfig().openAtUnread) {
     int first = firstUnreadIndex(n);
     if (first >= 0) { _focus = first; _pinBottom = false; _pinFocusTop = true; }
   }
@@ -197,17 +211,31 @@ int MessageThreadApplet::firstUnreadIndex(int n) const {
   return i < 0 ? 0 : i;   // more unread claimed than inbound present -> oldest
 }
 
+// Keep the wire text in the store for Questions, forwarding and retries.
+static const char* displayMessage(const MessageView& message, Question& question,
+                                  char (&timerName)[161]) {
+  if (!message.isChannel && (!message.senderName || !*message.senderName)) {
+    if (parseQuestion(message.text, question)) return question.prompt();
+    uint32_t seconds;
+    if (parseTimerRequest(message.text, timerName, seconds)) return timerName;
+  }
+  return message.text;
+}
+
 int MessageThreadApplet::blockHeight(Canvas& body, const MessageView& m) const {
+  Question question;
+  char timerName[161];
+  const char* text = _key.type == 0 ? displayMessage(m, question, timerName) : m.text;
   int adv = body.lineHeight(fontBody());    if (adv <= 0) adv = 8;
   int cap = body.lineHeight(fontCaption()); if (cap <= 0) cap = 6;   // recessive metadata row
   int cw = _contentW;
   if (m.outbound) {
     int bubbleW = (cw * 3) / 4;
-    int bodyH = wrapText(body, 0, 0, bubbleW - 2 * PAD, m.text, DisplayDriver::DARK, false);
+    int bodyH = wrapText(body, 0, 0, bubbleW - 2 * PAD, text, DisplayDriver::DARK, false);
     if (bodyH < adv) bodyH = adv;
     return (bodyH + 2 * PAD) + cap + GAP;          // bubble (body font) + caption status + gap
   }
-  int bodyH = wrapText(body, 0, 0, cw - GUTTER - PAD, m.text, DisplayDriver::LIGHT, false);
+  int bodyH = wrapText(body, 0, 0, cw - GUTTER - PAD, text, DisplayDriver::LIGHT, false);
   if (bodyH < adv) bodyH = adv;
   return cap + bodyH + GAP;                         // caption sender/divider row + body + gap
 }
@@ -279,6 +307,9 @@ void MessageThreadApplet::msgStamp(const MessageView& m, char* out, uint16_t cap
 }
 
 void MessageThreadApplet::drawMessage(Canvas& body, const MessageView& m, int top, int blockH, bool focused) const {
+  Question question;
+  char timerName[161];
+  const char* text = _key.type == 0 ? displayMessage(m, question, timerName) : m.text;
   int adv = body.lineHeight(fontBody());    if (adv <= 0) adv = 8;
   int cap = body.lineHeight(fontCaption()); if (cap <= 0) cap = 6;
   int bh = blockH;   // cached height; no re-measure here
@@ -295,7 +326,7 @@ void MessageThreadApplet::drawMessage(Canvas& body, const MessageView& m, int to
     int bubbleH = bh - cap - GAP;
     if (bubbleH < adv + 2 * PAD) bubbleH = adv + 2 * PAD;
     blk.fillRect(bx, 0, bubbleW, bubbleH, DisplayDriver::LIGHT);
-    wrapText(blk, bx + PAD, PAD, bubbleW - 2 * PAD, m.text, DisplayDriver::DARK, true);
+    wrapText(blk, bx + PAD, PAD, bubbleW - 2 * PAD, text, DisplayDriver::DARK, true);
     char st[28]; statusLabel(m, st, sizeof(st));
     char ts[20]; msgStamp(m, ts, sizeof(ts));
     if (ts[0]) blk.drawText(fontCaption(), bx, bubbleH, ts, DisplayDriver::LIGHT, TextAlign::Left);
@@ -315,7 +346,7 @@ void MessageThreadApplet::drawMessage(Canvas& body, const MessageView& m, int to
   }
   char ts[20]; msgStamp(m, ts, sizeof(ts));
   if (ts[0]) blk.drawText(fontCaption(), cw, 0, ts, DisplayDriver::LIGHT, TextAlign::Right);
-  wrapText(blk, GUTTER, cap, cw - GUTTER - PAD, m.text, DisplayDriver::LIGHT, true);
+  wrapText(blk, GUTTER, cap, cw - GUTTER - PAD, text, DisplayDriver::LIGHT, true);
   if (focused) blk.drawText(fontBody(), 0, cap, ">", DisplayDriver::LIGHT);
 }
 

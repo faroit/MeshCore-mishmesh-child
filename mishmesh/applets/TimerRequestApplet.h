@@ -10,7 +10,9 @@ class TimerRequestApplet : public Applet {
 public:
   TimerRequestApplet() : Applet("Timer request") {}
   bool enqueue(const ConvoKey& key, uint32_t senderTime, const char* text);
-  bool pending() const { return _count != 0; }
+  bool pending() const { return _state == State::Done || (_state == State::Idle && _count != 0); }
+  bool tick(uint32_t now);
+  bool blocksSleep() const override { return _state == State::Running; }
   bool isOpen() const { return _open; }
   void onStart(AppletContext& ctx) override;
   void onStop() override { _open = false; }
@@ -25,6 +27,13 @@ private:
     uint32_t seconds;
     char prompt[161];
   };
+  enum class State { Idle, Running, Done };
+  State _state = State::Idle;
+  char _timerName[161]{};
+  uint32_t _deadline = 0;
+  uint32_t _ringStarted = 0;
+  uint32_t _lastRing = 0;
+  bool _ringed = false;
   Request _requests[4]{};
   int _count = 0;
   bool _open = false;
@@ -35,6 +44,7 @@ private:
   Marquee _prompt;
 
   bool available() const;
+  void removeRequest();
   void advance();
 };
 

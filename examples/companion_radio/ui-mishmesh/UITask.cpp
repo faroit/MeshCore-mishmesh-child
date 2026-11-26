@@ -1,10 +1,12 @@
 #include <mishmesh/applets/TimerRequestApplet.h>
 #include <mishmesh/applets/CallBellApplet.h>
 #include <mishmesh/core/PixelEmoji.h>
+#include <mishmesh/core/Question.h>
 #include "UITask.h"
 #include "target.h"   // rtc_clock
 #include <helpers/sensors/LocationProvider.h>
 #include <mishmesh/Version.h>
+#include <mishmesh/ChildVersion.h>
 #include <mishmesh/applets/NotificationApplet.h>
 #include <mishmesh/applets/onboarding_logo.h>   // MeshCore + mishmesh wordmarks
 #include <mishmesh/applets/ClockAlertApplet.h>
@@ -206,6 +208,12 @@ void UITask::busyTick(void* self) {
 
 void UITask::drawBootSplash(DisplayDriver* disp) {
   using namespace mishmesh;
+#ifdef MISHMESH_CHILD
+  const int top = disp->height() / 2 - 17;
+  disp->drawTextCentered(disp->width() / 2, top, "MishmeshChild");
+  disp->drawTextCentered(disp->width() / 2, top + 12, MISHMESH_CHILD_VERSION);
+  disp->drawTextCentered(disp->width() / 2, top + 24, "Mishmesh " MISHMESH_VERSION);
+#else
   const int gap = 5;   // matches the onboarding Welcome stacking
   const int blockH = MESHCORE_LOGO_H + gap + MISHMESH_LOGO_H;
   const int top = (disp->height() - blockH) / 2;
@@ -213,6 +221,7 @@ void UITask::drawBootSplash(DisplayDriver* disp) {
                 MESHCORE_LOGO, MESHCORE_LOGO_W, MESHCORE_LOGO_H);
   disp->drawXbm((disp->width() - MISHMESH_LOGO_W) / 2, top + MESHCORE_LOGO_H + gap,
                 MISHMESH_LOGO, MISHMESH_LOGO_W, MISHMESH_LOGO_H);
+#endif
 }
 
 void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* node_prefs) {
@@ -399,7 +408,93 @@ void UITask::onMessageRecv(mesh::Packet* /*pkt*/, const ContactInfo& from, uint8
       the_mesh.isContactAllowed(from) &&
       mishmesh::timerRequestApplet().enqueue(mishmesh::directKey(from.id.pub_key),
                                              sender_timestamp, text)) return;
-  if (!hasConnection()) notify(UIEventType::contactMessage);
+  mishmesh::Question question;
+  const bool questionReceived = txt_type == TXT_TYPE_PLAIN && from.type == ADV_TYPE_CHAT &&
+                                mishmesh::parseQuestion(text, question);
+  if (!hasConnection() || questionReceived) notify(UIEventType::contactMessage);
+}
+
+// Child-companion command syntax, adapted to mishmesh settings and the
+// locally designated remote parent. Commands are consumed before chat storage.
+bool UITask::onParentCommand(const ContactInfo& from, uint32_t timestamp, const char* text) {
+  enum Command { Pin, Timezone, Preset, Name, Retry, Gps, Sound };
+  static const char* names[] = {"!pin", "!tz", "!preset", "!name", "!retry", "!gps", "!sound"};
+  const char* args = strchr(text, ' ');
+  const size_t size = args ? size_t(args - text) : strlen(text);
+  unsigned command = 0;
+  for (; command < sizeof(names) / sizeof(names[0]); ++command)
+    if (strlen(names[command]) == size && memcmp(text, names[command], size) == 0) break;
+  if (command == sizeof(names) / sizeof(names[0])) return false;
+
+  auto& policy = the_mesh.messageAccess();
+  if (!_host || !args || !policy.isRemoteParent(from.id.pub_key)) return true;
+  while (*args == ' ') ++args;
+  char* end = nullptr;
+  long number = 0;
+  unsigned volume = 0;
+  bool enabled = false;
+  switch (command) {
+    case Pin:
+      if (strlen(args) != 13 || args[6] != ' ' ||
+          strspn(args, "0123456789") != 6 || strspn(args + 7, "0123456789") != 6) return true;
+      break;
+    case Timezone:
+      number = strtol(args, &end, 10);
+      if (end == args || *end || number < -720 || number > 840 || number % 15 != 0) return true;
+      break;
+    case Preset:
+      number = strtol(args, &end, 10);
+      if (number < 1 || number > mishmesh::QuickReplyStore::MAX_ITEMS ||
+          (*end && *end != ' ')) return true;
+      args = end;
+      while (*args == ' ') ++args;
+      if (strlen(args) > mishmesh::QuickReplyStore::MAX_LEN) return true;
+      break;
+    case Name:
+      if (!*args || strlen(args) >= sizeof(from.name)) return true;
+      break;
+    case Retry:
+    case Gps:
+      enabled = strcmp(args, "on") == 0;
+      if (!enabled && strcmp(args, "off") != 0) return true;
+      break;
+    case Sound: {
+      static const char* levels[] = {"mute", "low", "mid", "high"};
+      while (volume < 4 && strcmp(args, levels[volume]) != 0) ++volume;
+      if (volume == 4) return true;
+      break;
+    }
+  }
+
+  if (!policy.claimRemoteCommand(from.id.pub_key, timestamp)) return true;
+  switch (command) {
+    case Pin: {
+      char oldPin[7];
+      memcpy(oldPin, args, 6);
+      oldPin[6] = 0;
+      const uint32_t now = millis();
+      if (policy.unlock(oldPin, now)) {
+        policy.setPin(args + 7, now);
+        policy.lock();
+      }
+      break;
+    }
+    case Timezone: setTzOffsetMinutes(number); break;
+    case Preset: {
+      auto& replies = mishmesh::quickReplyStore();
+      const int slot = int(number) - 1;
+      if (!*args) replies.remove(slot);
+      else if (slot == replies.count()) replies.add(args);
+      else replies.set(slot, args);
+      break;
+    }
+    case Name: renameContact(from.id.pub_key, args); break;
+    case Retry: _msgSvc.setRemoteRetry(enabled); break;
+    case Gps: applyGpsEnabled(enabled); break;
+    case Sound: setSoundVolume(volume); break;
+  }
+  _host->requestRender();
+  return true;
 }
 
 void UITask::onChannelMessageRecv(mesh::Packet* /*pkt*/, ChannelDetails& /*channel_details*/,
@@ -454,12 +549,19 @@ void UITask::dispatchNotification(UIEventType t) {
     return;
   }
 
+  mishmesh::MessageView latest;
+  mishmesh::Question question;
+  const int count = _msgSvc.messageCount(c);
+  const bool isQuestion = c.type == 0 && count > 0 &&
+      _msgSvc.getMessage(c, count - 1, latest) && !latest.outbound &&
+      latest.kind == mishmesh::KIND_INBOUND && mishmesh::parseQuestion(latest.text, question);
+
   mishmesh::ConvoKey active;
   bool inThisChat = _msgStore.activeConvo(active) && active.equals(c);
   bool sleeping   = _host && !_host->isDisplayOn();
 
   // Reading this very chat (awake): the thread surfaces the arrival itself.
-  if (inThisChat && !sleeping) {
+  if (inThisChat && !sleeping && !isQuestion) {
     if (_host) _host->requestRender();
     return;
   }
@@ -481,7 +583,7 @@ void UITask::dispatchNotification(UIEventType t) {
   bool alerts = (lvl == mishmesh::NotifyLevel::All) ||
                 (lvl == mishmesh::NotifyLevel::MentionsOnly && mention);
 
-  if (!alerts) {
+  if (!alerts && !isQuestion) {
     // Mute, or a non-mention in a mentions-only chat: list badge already updated
     // at capture; stay silent and out of the global count.
     if (_host) _host->requestRender();
@@ -489,7 +591,7 @@ void UITask::dispatchNotification(UIEventType t) {
   }
 
   _msgStore.markNotifiable(c);   // feeds totalNotifyUnread() (global indicator/bubble)
-  {
+  if (alerts) {
     uint8_t typeByte = isChannel ? _node_prefs->notify_tone_ch : _node_prefs->notify_tone_dm;
     SoundId id;
     if (mishmesh::sound::resolveNotifyTone(_msgSvc.chatSound(c), typeByte,
@@ -501,12 +603,22 @@ void UITask::dispatchNotification(UIEventType t) {
   }
   if (!_host) return;
 
+  auto& notification = mishmesh::notificationApplet();
+  if (isQuestion) {
+    notification.raise(&_msgSvc, c);
+    _host->wakeDisplay();
+    if (!notification.isOpen()) _host->push(&notification);
+    _host->requestRender();
+    return;
+  }
+  if (notification.showingQuestion()) return;
+
   bool atHome = _host->foreground() == _home;
   if (sleeping) {
     if (wakeAllowedFor(c)) {
       mishmesh::notificationApplet().raise(&_msgSvc, c);
       _host->wakeDisplay();
-      if (_host->foreground() != &mishmesh::notificationApplet())
+      if (!notification.isOpen())
         _host->push(&mishmesh::notificationApplet());
     }
     // else: stay dark. markNotifiable already updated the unread count, so the
@@ -514,7 +626,7 @@ void UITask::dispatchNotification(UIEventType t) {
     // under a dark screen would drop the user into an alert they never saw.
   } else if (atHome) {
     mishmesh::notificationApplet().raise(&_msgSvc, c);
-    if (_host->foreground() != &mishmesh::notificationApplet())
+    if (!notification.isOpen())
       _host->push(&mishmesh::notificationApplet());
   } else {
     _host->postBubble(_msgSvc.totalNotifyUnread());
@@ -603,6 +715,7 @@ void UITask::loop() {
       _host->requestRender();
     }
     auto& request = mishmesh::timerRequestApplet();
+    if (request.tick(millis())) _host->wakeDisplay();
     if (request.pending() && !request.isOpen() && !bell.isOpen() &&
         _host->foreground() != &mishmesh::clockAlertApplet()) {
       _host->wakeDisplay();
@@ -1293,6 +1406,7 @@ void UITask::MsgSvc::setChatWake(const mishmesh::ConvoKey& k, mishmesh::WakeOver
 #define MSGCFG_AUTO_RESET_PATH 0x02
 #define MSGCFG_SUPPRESS_WAKE   0x04
 #define MSGCFG_OPEN_AT_UNREAD  0x08
+#define MSGCFG_REMOTE_RETRY    0x10
 
 mishmesh::MessagesConfig UITask::MsgSvc::getMessagesConfig() const {
   if (!_msgFlagsLoaded) {                 // load the file once, then serve from RAM
@@ -1305,7 +1419,8 @@ mishmesh::MessagesConfig UITask::MsgSvc::getMessagesConfig() const {
     _repeatLoaded = true;
   }
   mishmesh::MessagesConfig c;
-  c.autoRetry     = the_mesh.messageAccess().restricted() || (_msgFlags & MSGCFG_AUTO_RETRY) != 0;
+  c.autoRetry = (_msgFlags & MSGCFG_AUTO_RETRY) != 0 ||
+      (the_mesh.messageAccess().restricted() && !(_msgFlags & MSGCFG_REMOTE_RETRY));
   c.autoResetPath = the_mesh.messageAccess().restricted() || (_msgFlags & MSGCFG_AUTO_RESET_PATH) != 0;
   NodePrefs* p = the_mesh.getNodePrefs();
   c.directAcks = (p && p->multi_acks >= 1) ? 2 : 1;
@@ -1316,8 +1431,15 @@ mishmesh::MessagesConfig UITask::MsgSvc::getMessagesConfig() const {
   return c;
 }
 
+void UITask::MsgSvc::setRemoteRetry(bool enabled) {
+  getMessagesConfig();  // load the saved flags before changing a single setting
+  uint8_t flags = (_msgFlags & ~MSGCFG_AUTO_RETRY) | MSGCFG_REMOTE_RETRY;
+  if (enabled) flags |= MSGCFG_AUTO_RETRY;
+  if (storage && storage->save("msgcfg", &flags, 1)) _msgFlags = flags;
+}
+
 void UITask::MsgSvc::setMessagesConfig(const mishmesh::MessagesConfig& c) {
-  uint8_t flags = 0;
+  uint8_t flags = _msgFlags & MSGCFG_REMOTE_RETRY;
   if (c.autoRetry)     flags |= MSGCFG_AUTO_RETRY;
   if (c.autoResetPath) flags |= MSGCFG_AUTO_RESET_PATH;
   if (!c.wakeOnMessage) flags |= MSGCFG_SUPPRESS_WAKE;

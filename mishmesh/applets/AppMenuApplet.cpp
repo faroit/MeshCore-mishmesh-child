@@ -4,16 +4,26 @@
 #include <mishmesh/text/Fonts.h>
 #include <mishmesh/core/MessagesService.h>
 #include <mishmesh/applets/MessagesApplet.h>
+#include <helpers/MessageAccessPolicy.h>
 #include <stdio.h>
+#include <string.h>
 
 namespace mishmesh {
 
 void AppMenuApplet::onStart(AppletContext& ctx) {
   _host = ctx.host;
+  _app = ctx.app;
   _ctx_messages = ctx.messages;
+  _grid.setModel(this);
+  _grid.setRowHeight(20);
+}
+
+void AppMenuApplet::onForeground() {
+  const auto* access = _app ? _app->messageAccess() : nullptr;
   _count = 0;
   for (const AppletRegistration* r = registeredApplets(); r; r = r->next) {
     if (r->placement != Placement::AppMenu || _count >= MAX_ENTRIES) continue;
+    if (access && access->restricted() && strcmp(r->label, "2048") == 0) continue;
     int i = _count++;
     while (i > 0 && _entries[i - 1]->order > r->order) {
       _entries[i] = _entries[i - 1];
@@ -21,8 +31,10 @@ void AppMenuApplet::onStart(AppletContext& ctx) {
     }
     _entries[i] = r;
   }
-  _grid.setModel(this);
-  _grid.setRowHeight(20);
+  if (_grid.selected() >= _count) {
+    _grid.setModel(nullptr);
+    _grid.setModel(this);
+  }
 }
 
 int AppMenuApplet::onRender(Canvas& c) {

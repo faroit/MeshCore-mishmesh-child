@@ -1,5 +1,6 @@
 // mishmesh/applets/AboutApplet.cpp
 #include "AboutApplet.h"
+#include <mishmesh/ChildVersion.h>
 #include <mishmesh/applets/onboarding_logo.h>   // MISHMESH_LOGO wordmark
 #include <mishmesh/core/AppletRegistry.h>
 #include <mishmesh/core/Canvas.h>
@@ -22,8 +23,13 @@ void AboutApplet::onStart(AppletContext& ctx) {
   if (_app) {
     SystemStats s;
     if (_app->systemStats(s)) {
+#ifdef MISHMESH_CHILD
+      if (s.meshcoreVersion) snprintf(_version, sizeof(_version), "MeshCore %s", s.meshcoreVersion);
+      if (s.mishmeshVersion) snprintf(_mmVersion, sizeof(_mmVersion), "Mishmesh %s", s.mishmeshVersion);
+#else
       if (s.meshcoreVersion) snprintf(_version, sizeof(_version), "mc %s", s.meshcoreVersion);
       if (s.mishmeshVersion) snprintf(_mmVersion, sizeof(_mmVersion), "mm %s", s.mishmeshVersion);
+#endif
     }
   }
   _qr.build(SUPPORT_URL);
@@ -32,6 +38,15 @@ void AboutApplet::onStart(AppletContext& ctx) {
 int AboutApplet::onRender(Canvas& c) {
   const int w = c.width(), h = c.height();
 
+#ifdef MISHMESH_CHILD
+  const Font* font = fontBody();
+  const int line = c.lineHeight(font) + 2;
+  const int top = (h - line * 4) / 2;
+  c.drawText(font, w / 2, top, "MishmeshChild", DisplayDriver::LIGHT, TextAlign::Center);
+  c.drawText(font, w / 2, top + line, MISHMESH_CHILD_VERSION, DisplayDriver::LIGHT, TextAlign::Center);
+  c.drawText(font, w / 2, top + 2 * line, _mmVersion, DisplayDriver::LIGHT, TextAlign::Center);
+  c.drawText(font, w / 2, top + 3 * line, _version, DisplayDriver::LIGHT, TextAlign::Center);
+#else
   // The QR takes a square off the short edge and the wordmark + support text fill
   // what is left. On a landscape canvas that leftover is a column beside it; on a
   // portrait one it is a band underneath, and splitting sideways there left the
@@ -66,6 +81,7 @@ int AboutApplet::onRender(Canvas& c) {
     if (_mmVersion[0]) { r.drawText(f, 0, vy, _mmVersion, DisplayDriver::LIGHT); vy -= lh; }
     if (_version[0])     r.drawText(f, 0, vy, _version, DisplayDriver::LIGHT);
   }
+#endif
   return 1000;
 }
 

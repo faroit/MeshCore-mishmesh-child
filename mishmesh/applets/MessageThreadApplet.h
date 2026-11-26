@@ -16,6 +16,7 @@ public:
   MessageThreadApplet() : Applet("Thread") {}
   void setTarget(const ConvoKey& k, const char* fallbackName = nullptr);
   void composeOnOpen() { _composeOnOpen = true; }   // one-shot: open focused on the Write button
+  void focusNewestUnreadOnOpen() { _newestUnreadOnOpen = true; }
   void onStart(AppletContext&) override;
   void onForeground() override;
   void onBackground() override;
@@ -131,6 +132,7 @@ private:
   bool openQuestion(int index);
   bool _questionOnOpen = false;
   int       _barRow = -1;     // -1 = on a message; 0 = Write; 1 = Quick
+  bool      _newestUnreadOnOpen = false;
   bool      _composeOnOpen = false;   // one-shot: focus the Write button on next onStart
   Button    _btn;             // reused to draw each stacked action button in turn
   char _composeBuf[KeypadApplet::KP_MAX + 1];   // backs keypad text during compose

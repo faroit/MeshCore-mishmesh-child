@@ -108,13 +108,6 @@ void ClockService::tmToggle(uint32_t nowMs) {
   }
 }
 
-bool ClockService::tmStartOnce(uint32_t secs, uint32_t nowMs) {
-  if (tmRunning() || tmPaused() || secs == 0 || secs > TIMER_MAX_SECS) return false;
-  _tmRemainMs = secs * 1000u;
-  tmToggle(nowMs);
-  return true;
-}
-
 void ClockService::tmReset() {
   _tmRunning = false;
   _tmRemainMs = _tmDurationSecs * 1000u;

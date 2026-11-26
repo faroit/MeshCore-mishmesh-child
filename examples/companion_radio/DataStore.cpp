@@ -680,7 +680,16 @@ int DataStore::loadAccessPolicy(MessageAccessPolicy::Record& out) {
   if (!_fs->exists("/access")) return _fs->exists("/access.tmp") ? -1 : 0;
   File f = openRead(_fs, "/access");
   if (!f) return -1;
-  bool ok = f.size() == sizeof(out) && f.read(reinterpret_cast<uint8_t*>(&out), sizeof(out)) == sizeof(out);
+  using Record = MessageAccessPolicy::Record;
+  constexpr size_t legacyPrefix = offsetof(Record, remoteTimestamp);
+  bool ok = false;
+  if (f.size() == sizeof(out)) {
+    ok = f.read(reinterpret_cast<uint8_t*>(&out), sizeof(out)) == sizeof(out) && out.magic[3] == 2;
+  } else if (f.size() == legacyPrefix + sizeof(out.checksum)) {
+    out.remoteTimestamp = 0;
+    ok = f.read(reinterpret_cast<uint8_t*>(&out), legacyPrefix) == legacyPrefix &&
+         f.read(out.checksum, sizeof(out.checksum)) == sizeof(out.checksum) && out.magic[3] == 1;
+  }
   f.close();
   return ok ? 1 : -1;
 }

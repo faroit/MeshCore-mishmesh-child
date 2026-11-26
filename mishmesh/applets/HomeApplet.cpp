@@ -1,4 +1,5 @@
 #include <mishmesh/applets/HomeApplet.h>
+#include <mishmesh/applets/MessageThreadApplet.h>
 #include <mishmesh/core/AppletHost.h>
 #include <mishmesh/core/AppletRegistry.h>
 #include <mishmesh/core/Canvas.h>
@@ -184,16 +185,18 @@ int HomeApplet::onRender(Canvas& c) {
     const AppletRegistration* rr = childLocked
         ? nullptr : uiPrefs().quickAction(UiPrefs::SLOT_RIGHT);
     if (lr) hintLabel(lr->label, l4);
-    if (rr) hintLabel(rr->label, r4);
+    if (childLocked) hintLabel("Last", r4);
+    else if (rr) hintLabel(rr->label, r4);
+    const bool showRight = childLocked || rr;
     // measure the run: [<l4] [#Apps] [vTgls] [r4>]
     const int GLYPH = 5, PAD = 2;
     int GAP = 8;
     int wl = lr ? 3 + PAD + c.textWidth(f, l4) : 0;
     int wa = _menu ? 3 + PAD + c.textWidth(f, "Apps") : 0;
     int wt = GLYPH + PAD + c.textWidth(f, "Tgls");
-    int wr = rr ? c.textWidth(f, r4) + PAD + 3 : 0;
+    int wr = showRight ? c.textWidth(f, r4) + PAD + 3 : 0;
     int total = wl + wa + wt + wr;
-    int gaps = (lr ? 1 : 0) + (_menu ? 1 : 0) + (rr ? 1 : 0);
+    int gaps = (lr ? 1 : 0) + (_menu ? 1 : 0) + (showRight ? 1 : 0);
     if (gaps > 0 && total + gaps * GAP > w) {
       GAP = (w - total) / gaps;
       if (GAP < 2) GAP = 2;
@@ -220,7 +223,7 @@ int HomeApplet::onRender(Canvas& c) {
     triDown(c, x, gy);
     c.drawText(f, x + GLYPH + PAD, y, "Tgls", DisplayDriver::LIGHT);
     x += wt;
-    if (rr) {
+    if (showRight) {
       x += GAP;
       c.drawText(f, x, y, r4, DisplayDriver::LIGHT);
       triRight(c, x + c.textWidth(f, r4) + PAD, gy);
@@ -280,8 +283,28 @@ bool HomeApplet::onInput(InputEvent ev) {
     case InputEvent::NavRight: {
       MessageAccessPolicy* access = _app ? _app->messageAccess() : nullptr;
       const bool childLocked = access && access->restricted();
+      if (childLocked && ev == InputEvent::NavRight && _host && _msgs) {
+        ConvoView last{};
+        bool found = false;
+        const int count = _msgs->convoCount();
+        for (int i = 0; i < count; ++i) {
+          ConvoView chat;
+          if (_msgs->getConvo(i, chat) && chat.key.type == 0 &&
+              (!found || chat.lastTime > last.lastTime) && _msgs->messageCount(chat.key) > 0) {
+            last = chat;
+            found = true;
+          }
+        }
+        if (found) {
+          auto& thread = messageThreadApplet();
+          thread.setTarget(last.key);
+          thread.focusNewestUnreadOnOpen();
+          _host->push(&thread);
+          return true;
+        }
+      }
       const AppletRegistration* r = childLocked
-          ? (ev == InputEvent::NavLeft ? messagesShortcut() : nullptr)
+          ? messagesShortcut()
           : uiPrefs().quickAction(ev == InputEvent::NavLeft ? UiPrefs::SLOT_LEFT : UiPrefs::SLOT_RIGHT);
       if (r && _host) { _host->push(r->applet); return true; }
       return false;
