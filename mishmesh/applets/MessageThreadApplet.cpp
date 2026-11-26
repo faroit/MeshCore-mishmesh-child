@@ -131,9 +131,13 @@ void MessageThreadApplet::onStart(AppletContext& ctx) {
   _lastSeq = _svc ? _svc->seq() : 0;
   _prevCount = n;
   _lastMsgTime = 0;        // seed from the newest message so the open frame isn't seen as an arrival
+  _lastSenderTime = 0;
   if (n > 0 && _svc) {
     MessageView mv;
-    if (_svc->getMessage(_key, n - 1, mv)) _lastMsgTime = mv.localTime ? mv.localTime : mv.senderTime;
+    if (_svc->getMessage(_key, n - 1, mv)) {
+      _lastMsgTime = mv.localTime ? mv.localTime : mv.senderTime;
+      _lastSenderTime = mv.senderTime;
+    }
   }
   _unseenBelow = false;    // we open pinned to the newest message
   _menuOpen = false;
@@ -373,23 +377,37 @@ int MessageThreadApplet::onRender(Canvas& c) {
   // back to senderTime when the RTC is unset. The count test is kept as a secondary
   // signal for the (common) below-cap case so same-second arrivals still register.
   uint32_t newestTime = 0;
+  uint32_t newestSenderTime = 0;
+  bool newestOutboundDM = false;
   if (n > 0 && _svc) {
     MessageView mv;
-    if (_svc->getMessage(_key, n - 1, mv)) newestTime = mv.localTime ? mv.localTime : mv.senderTime;
+    if (_svc->getMessage(_key, n - 1, mv)) {
+      newestTime = mv.localTime ? mv.localTime : mv.senderTime;
+      newestSenderTime = mv.senderTime;
+      newestOutboundDM = mv.kind == KIND_OUT_DM;
+    }
   }
-  bool newArrived = (n > _prevCount) || (newestTime > _lastMsgTime);
+  const bool newOutboundDM = newestOutboundDM &&
+      (n > _prevCount || newestTime > _lastMsgTime ||
+       (n == _prevCount && newestSenderTime != _lastSenderTime));
+  const bool newArrived = newOutboundDM || n > _prevCount || newestTime > _lastMsgTime;
 
   if (newArrived) {
-    // The caret never follows an arrival - the user's reading position stays put.
-    // But if the cap evicted the oldest to make room, every index shifted down, so
-    // step the caret down by however many were dropped to keep it on the SAME
-    // message instead of letting it jump to the next one. (Assumes one new message
-    // per step, which holds in practice - the UI repaints between arrivals.)
-    int evicted = (_prevCount + 1) - n;
-    if (evicted > 0) { _focus -= evicted; if (_focus < 0) _focus = 0; }
+    // Automatic replies use the same outgoing records as composed DMs. Follow
+    // them when the user was already at the end of the conversation.
+    if (newOutboundDM && _barRow < 0 && _focus == (_prevCount > 0 ? _prevCount - 1 : 0) &&
+        !_menuOpen && !_qrOpen) {
+      _focus = n - 1;
+    } else {
+      // Keep the selected message when a new one evicts old history.
+      const int evicted = (_prevCount + 1) - n;
+      if (evicted > 0) { _focus -= evicted; if (_focus < 0) _focus = 0; }
+    }
+    if (n == _prevCount && newestTime == _lastMsgTime) _layValid = false;
   }
   _prevCount = n;
   _lastMsgTime = newestTime;
+  _lastSenderTime = newestSenderTime;
   if (_svc && _svc->seq() != _lastSeq) {
     _lastSeq = _svc->seq();
     if (_focus >= n) _focus = n > 0 ? n - 1 : 0;   // clamp after deletions
@@ -456,7 +474,7 @@ int MessageThreadApplet::onRender(Canvas& c) {
   }
   adjustScroll();
 
-  // New-message chevron, decided from actual visibility (the caret is never moved).
+  // New-message chevron, decided from actual visibility.
   // The newest message's bottom sits BTN_H above the content end - the action bar
   // always trails it - so test against that, not the absolute bottom. Raise the
   // marker only when a message *arrived* below the fold; clear it the moment the

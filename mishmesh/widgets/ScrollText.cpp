@@ -8,6 +8,70 @@
 
 namespace mishmesh {
 
+bool ScrollableTextPreview::onInput(InputEvent ev) {
+  if (!_maxOffset) return false;
+  if (ev == InputEvent::NavUp) {
+    if (_offset > 0) --_offset;
+  } else if (ev == InputEvent::NavDown) {
+    if (_offset < _maxOffset) ++_offset;
+  } else {
+    return false;
+  }
+  _manualScroll = true;
+  return true;
+}
+
+bool ScrollableTextPreview::draw(Canvas& c, int x, int y, int w, int h, const char* text) {
+  const auto* font = fontBody();
+  const int lineHeight = c.lineHeight(font);
+  if (w <= 4 || lineHeight <= 0 || h < lineHeight) {
+    reset();
+    return false;
+  }
+  const int visibleLines = h / lineHeight;
+  const int viewportHeight = visibleLines * lineHeight;
+  int textWidth = w;
+  int contentHeight = c.measureTextWrapped(font, textWidth, text);
+  const bool overflows = contentHeight > viewportHeight;
+  if (overflows) {
+    textWidth -= 4;
+    contentHeight = c.measureTextWrapped(font, textWidth, text);
+  }
+  _maxOffset = overflows ? contentHeight / lineHeight - visibleLines : 0;
+  if (_offset > _maxOffset) _offset = _maxOffset;
+
+  if (overflows) {
+    constexpr uint32_t LINE_DWELL_MS = 2000;
+    constexpr uint32_t MANUAL_PAUSE_MS = 4000;
+    const uint32_t now = c.now();
+    if (_manualScroll || !_scheduled) {
+      _advanceAt = now + (_manualScroll ? MANUAL_PAUSE_MS : LINE_DWELL_MS);
+      _manualScroll = false;
+      _scheduled = true;
+    } else if (int32_t(now - _advanceAt) >= 0) {
+      if (_offset == _maxOffset) {
+        // Restart at the top after reading the last line.
+        _offset = _scrollY = 0;
+      } else {
+        ++_offset;
+      }
+      _advanceAt = now + LINE_DWELL_MS;
+    }
+  } else {
+    reset();
+  }
+
+  Canvas view = c.region(x, y, w, viewportHeight);
+  const int targetY = _offset * lineHeight;
+  const int maxScrollY = _maxOffset * lineHeight;
+  if (_scrollY > maxScrollY) _scrollY = maxScrollY;
+  _scrollY = approach(_scrollY, targetY, 1);
+  _animating = _scrollY != targetY;
+  view.drawTextWrapped(font, 0, -_scrollY, textWidth, text, DisplayDriver::LIGHT);
+  if (overflows) view.drawScrollbarThumb(w - 2, viewportHeight, contentHeight, _scrollY);
+  return overflows;
+}
+
 void ScrollText::addLine(const char* s) {
   if (_count >= MAX_LINES) return;
   strncpy(_lines[_count], s ? s : "", LINE_LEN - 1);

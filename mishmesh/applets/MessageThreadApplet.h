@@ -91,6 +91,7 @@ private:
   bool             _unseenBelow = false; // a message arrived below the fold -> show a chevron
   int              _prevCount = 0;    // message count last frame, to detect new arrivals
   uint32_t         _lastMsgTime = 0;  // newest message's time; detects arrivals even at the cap
+  uint32_t         _lastSenderTime = 0;
   uint32_t         _lastSeq = 0;
   bool             _menuOpen = false; // per-message action menu overlay (Reply/Delete/Path)
   bool             _qrOpen = false;   // quick-replies picker overlay (twin of _menuOpen)

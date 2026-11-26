@@ -3,7 +3,7 @@
 #include <mishmesh/core/Applet.h>
 #include <mishmesh/core/AlertSound.h>
 #include <mishmesh/core/MessagesService.h>
-#include <mishmesh/widgets/Marquee.h>
+#include <mishmesh/widgets/ScrollText.h>
 
 namespace mishmesh {
 
@@ -53,7 +53,7 @@ private:
   AppletHost* _host = nullptr;
   MessagesService* _messages = nullptr;
   sound::SoundEngine* _sound = nullptr;
-  Marquee _prompt;
+  ScrollableTextPreview _prompt;
 
   bool available() const;
   void sendStatus(const ConvoKey& key, const char* name, const char* status, uint32_t now);

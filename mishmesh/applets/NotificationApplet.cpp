@@ -21,6 +21,7 @@ void NotificationApplet::raise(MessagesService* svc, const ConvoKey& key) {
   _name[0] = _sender[0] = _preview[0] = 0;
   _isChannel = (key.type == 1);
   _otherUnread = 0;
+  _previewScroll.reset();
   _raisedAt = 0;   // restart the auto-dismiss timer on the next render
   if (!svc) return;
 
@@ -73,11 +74,9 @@ void NotificationApplet::onForeground() { _raisedAt = 0; }   // restart timer wh
 int NotificationApplet::onRender(Canvas& c) {
   uint32_t now = c.now();
   if (_raisedAt == 0) _raisedAt = now ? now : 1;
-  if (!_question && now - _raisedAt >= AUTO_MS) { if (_host) _host->pop(); return 0; }
 
   // The host renders the covered screen first (isOverlay), so dim it with a
-  // scrim and paint only the card. Inset enough that the background shows;
-  // the preview drops to one line, but Select opens the full chat anyway.
+  // scrim and paint only the inset card.
   c.fillStipple(0, 0, c.width(), c.height(), DisplayDriver::DARK);
   const int MX = 8, MY = 6;
   Canvas card = c.region(MX, MY, c.width() - 2 * MX, c.height() - 2 * MY);
@@ -113,19 +112,13 @@ int NotificationApplet::onRender(Canvas& c) {
   const mf_font_s* footFont = tierFont(c);
   int cap = card.fontHeight(footFont); if (cap <= 0) cap = 6;
 
-  // Preview body, wrapped in the band between the sender and footer. Snap the
-  // band to whole lines - a half-clipped text row reads as pixel garbage.
-  {
-    int pvH = (footY - 2) - y;
-    pvH -= pvH % lh;
-    if (pvH > 0) {
-      Canvas pv = card.region(3, y, W - 6, pvH);
-      pv.drawTextWrapped(fontBody(), 0, 0, W - 6, _preview, DisplayDriver::LIGHT);
-    }
-  }
+  const bool scrollable = _previewScroll.draw(card, 3, y, W - 6, footY - 2 - y, _preview);
 
   card.fillStipple(3, footY - 2, W - 6, 1, DisplayDriver::LIGHT);
-  if (_question) {
+  if (scrollable) {
+    card.drawTextEllipsized(footFont, 3, footY + (FOOT - cap) / 2, W - 6,
+                            "Up/Down to scroll", DisplayDriver::LIGHT);
+  } else if (_question) {
     card.drawTextEllipsized(footFont, 3, footY + (FOOT - cap) / 2, W - 6,
                             "OK: answer  Back: dismiss", DisplayDriver::LIGHT);
   } else if (_otherUnread > 0) {
@@ -139,12 +132,18 @@ int NotificationApplet::onRender(Canvas& c) {
 
   card.drawRoundRect(0, 0, W, H, DisplayDriver::LIGHT);   // rounded outer frame on top
 
+  if (scrollable) return _previewScroll.needsAnimation() ? ScrollableTextPreview::FRAME_MS : 250;
   if (_question) return 1000;
-  uint32_t shown = now - _raisedAt;
-  return (int)(shown < AUTO_MS ? AUTO_MS - shown : 0);   // wake to auto-dismiss
+  const uint32_t shown = now ? now - _raisedAt : 0;
+  if (shown >= AUTO_MS) {
+    if (_host) _host->pop();
+    return 0;
+  }
+  return (int)(AUTO_MS - shown);
 }
 
 bool NotificationApplet::onInput(InputEvent ev) {
+  if (_previewScroll.onInput(ev)) return true;
   if (ev == InputEvent::Select || ev == InputEvent::SelectLong) {
     if (_question) {
       if (_host && _svc) {

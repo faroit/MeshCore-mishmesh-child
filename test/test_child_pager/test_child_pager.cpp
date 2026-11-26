@@ -5,6 +5,7 @@
 #include <mishmesh/applets/CallBellApplet.h>
 #include <mishmesh/applets/TimerRequestApplet.h>
 #include <mishmesh/applets/MessageThreadApplet.h>
+#include <mishmesh/applets/NotificationApplet.h>
 #include <mishmesh/core/AppletHost.h>
 #include <mishmesh/core/Canvas.h>
 #include "FakeMessagesService.h"
@@ -140,6 +141,88 @@ TEST(CallBell, QueueIsBoundedAndChannelsRejected) {
   for (int i = 0; i < 4; ++i) EXPECT_TRUE(bell.enqueue(dad, i, "Dad"));
   EXPECT_FALSE(bell.enqueue(dad, 5, "Dad"));
 }
+TEST(NotificationPreview, ScrollsNormalMessagesAndQuestionPromptsOnThePager) {
+  Messages svc;
+  FakeDisplayDriver display;
+  Canvas canvas(&display);
+  NotificationApplet notification;
+  AppletContext ctx; ctx.messages = &svc;
+  notification.onStart(ctx);
+  const std::string message = "The first line and then the rest of the conversation. " + std::string(106, 'z');
+  const std::string prompt = "Choose what you want to eat tonight from the two choices below.";
+  auto render = [&]() {
+    display.litPixels.clear();
+    notification.onRender(canvas);
+    return display.litPixels;
+  };
+  auto settle = [&]() {
+    for (int i = 0; i < 8; ++i) render();
+    return render();
+  };
+  canvas.setNow(1);
+  receive(svc, dad, message.c_str());
+  notification.raise(&svc, dad);
+  EXPECT_EQ(message, notification.previewForTest());
+  const auto firstPage = render();
+  canvas.setNow(2000);
+  EXPECT_EQ(firstPage, render());
+  canvas.setNow(2001);
+  const auto movingPage = render();
+  EXPECT_NE(firstPage, movingPage);
+  const auto nextPage = settle();
+  EXPECT_NE(movingPage, nextPage);
+  EXPECT_NE(firstPage, nextPage);
+  notification.onInput(InputEvent::NavUp);
+  EXPECT_EQ(firstPage, settle());
+  canvas.setNow(4001);
+  EXPECT_EQ(firstPage, render());  // auto-scroll pauses after manual input
+  notification.onInput(InputEvent::NavDown);
+  EXPECT_NE(firstPage, render());
+  notification.onInput(InputEvent::NavUp);
+  EXPECT_EQ(firstPage, settle());
+  canvas.setNow(9000);
+  EXPECT_GT(notification.onRender(canvas), 0);
+
+  receive(svc, dad, ("?" + prompt + " | Pizza | Pasta").c_str(), 124);
+  notification.raise(&svc, dad);
+  EXPECT_EQ(prompt, notification.previewForTest());
+  const auto questionPage = render();
+  canvas.setNow(11000);
+  EXPECT_NE(questionPage, render());
+}
+
+TEST(TimerRequests, ScrollsLongPromptWithoutAcceptingOrDismissing) {
+  Messages svc;
+  FakeDisplayDriver display;
+  Canvas canvas(&display);
+  AppletContext ctx; ctx.messages = &svc;
+  TestRoot root;
+  AppletHost host(&display, ctx);
+  host.setRoot(&root);
+  TimerRequestApplet timer;
+  const char* request = "%Please bring your school bag and come inside after today's game | 5m";
+  receive(svc, dad, request);
+  ASSERT_TRUE(timer.enqueue(dad, 123, request));
+  host.push(&timer);
+  timer.onRender(canvas);
+  const auto firstPage = display.litPixels;
+  display.litPixels.clear();
+  canvas.setNow(2000);
+  EXPECT_EQ(ScrollableTextPreview::FRAME_MS, timer.onRender(canvas));
+  EXPECT_NE(firstPage, display.litPixels);
+  host.dispatch(InputEvent::NavUp);
+  for (int i = 0; i < 8; ++i) {
+    display.litPixels.clear();
+    timer.onRender(canvas);
+  }
+  EXPECT_EQ(firstPage, display.litPixels);
+  EXPECT_EQ(0, svc.sends);
+  EXPECT_TRUE(timer.pending());
+  host.dispatch(InputEvent::Select);
+  EXPECT_EQ(1, svc.sends);
+  EXPECT_TRUE(timer.blocksSleep());
+}
+
 TEST(TimerRequests, RepliesToOriginalSenderOnStartAndFinishAfterHiding) {
   Messages svc;
   FakeDisplayDriver display;

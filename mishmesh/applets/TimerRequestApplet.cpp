@@ -140,8 +140,8 @@ int TimerRequestApplet::onRender(Canvas& c) {
   }
 
   const int center = c.width() / 2;
-  _prompt.draw(c, fontBody(), 2, 2, c.width() - 4, 15,
-               name, DisplayDriver::LIGHT, now);
+  const bool scrollable = _prompt.draw(c, 2, 2, c.width() - 4, 15, name);
+  if (scrollable && _state == State::Idle) footer = "Up/Dn scroll  OK start  Back";
 
   const auto* font = _state == State::Done ? fontSubtitle() : fontNum();
   char time[12];
@@ -155,10 +155,11 @@ int TimerRequestApplet::onRender(Canvas& c) {
   c.drawTextScaled(font, center, timerY, headline, DisplayDriver::LIGHT,
                    scale, TextAlign::Center);
   c.drawTextEllipsized(fontCaption(), 2, bottom, c.width() - 4, footer, DisplayDriver::LIGHT);
-  return 250;
+  return _prompt.needsAnimation() ? ScrollableTextPreview::FRAME_MS : 250;
 }
 
 bool TimerRequestApplet::onInput(InputEvent ev) {
+  if (_prompt.onInput(ev)) return true;
   if (_state == State::Running) {
     if (ev == InputEvent::Back) _host->pop();
     return true;

@@ -5,6 +5,29 @@
 
 namespace mishmesh {
 
+// A wrapped message that scrolls automatically and pauses after manual input.
+class ScrollableTextPreview {
+public:
+  static constexpr int FRAME_MS = 33;
+  void reset() {
+    _offset = _maxOffset = _scrollY = 0;
+    _scheduled = _manualScroll = _animating = false;
+  }
+  bool overflows() const { return _maxOffset > 0; }
+  bool needsAnimation() const { return _animating; }
+  bool onInput(InputEvent ev);
+  bool draw(Canvas& c, int x, int y, int w, int h, const char* text);
+
+private:
+  int _offset = 0;
+  int _maxOffset = 0;
+  int _scrollY = 0;
+  uint32_t _advanceAt = 0;
+  bool _scheduled = false;
+  bool _manualScroll = false;
+  bool _animating = false;
+};
+
 // Reusable scrollable panel of plain text lines, with an optional header widget
 // (e.g. a Card) that scrolls together with the lines. NavUp/Down scroll; a thin
 // scrollbar appears when content overflows. Fixed storage, no heap.

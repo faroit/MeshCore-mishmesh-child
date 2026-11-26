@@ -1045,6 +1045,32 @@ TEST(MessageThread, OpenAtUnreadSkipsOutboundWhenCounting) {
   EXPECT_EQ(1, mishmesh::messageThreadApplet().focusedIndexForTest());
 }
 
+TEST(MessageThread, FollowsOutgoingRepliesOnlyAtEndOfConversation) {
+  FakeMessagesService svc;
+  const auto key = mishmesh::directKey((const uint8_t*)"ALICE!");
+  seedRead(svc, key, 2, 100);
+  FakeDisplayDriver display;
+  mishmesh::Canvas canvas(&display);
+  mishmesh::AppletContext ctx;
+  ctx.messages = &svc;
+  mishmesh::MessageThreadApplet thread;
+  thread.setTarget(key);
+  thread.onStart(ctx);
+  thread.onRender(canvas);
+  ASSERT_EQ(1, thread.focusedIndexForTest());
+
+  ASSERT_TRUE(svc.sendText(key, "GPS on."));
+  thread.onRender(canvas);
+  EXPECT_EQ(2, thread.focusedIndexForTest());
+
+  thread.onInput(mishmesh::InputEvent::NavUp);
+  thread.onRender(canvas);
+  ASSERT_EQ(1, thread.focusedIndexForTest());
+  ASSERT_TRUE(svc.sendText(key, "Timer finished: Snack"));
+  thread.onRender(canvas);
+  EXPECT_EQ(1, thread.focusedIndexForTest());
+}
+
 TEST(MessageThread, OpenAtUnreadOffStillOpensAtNewest) {
   FakeMessagesService svc;
   auto k = mishmesh::directKey((const uint8_t*)"ALICE!");
