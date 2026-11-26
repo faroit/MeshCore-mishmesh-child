@@ -75,7 +75,7 @@ void SoundEngine::setVolume(VolumeLevel v) { _volume = v; _seq.setVolume(effVol(
 
 void SoundEngine::setMasterMute(bool on) {
   _mute = on;
-  if (on) _seq.stop(); else _seq.setVolume(effVol());
+  if (on) stop(); else _seq.setVolume(effVol());
 }
 
 void SoundEngine::setCategoryEnabled(SoundCategory c, bool on) { _enabled[(int)c] = on; }

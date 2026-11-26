@@ -5,6 +5,7 @@
 #include <mishmesh/applets/ParentControlsApplet.h>
 #include <mishmesh/core/AppletHost.h>
 #include <mishmesh/core/Canvas.h>
+#include <mishmesh/text/Fonts.h>
 #include "FakeContactsService.h"
 #include "FakeDisplayDriver.h"
 
@@ -127,6 +128,43 @@ TEST_F(PolicyTest, DelayAndSessionHandleMillisWraparound) {
 }
 
 
+TEST_F(PolicyTest, OnlyDesignatedParentCanClaimCommandsAndFreshnessSurvivesReboot) {
+  using Result = MessageAccessPolicy::RemoteResult;
+  setup();
+  ASSERT_TRUE(policy.setAllowed(alice, true, 1));
+  EXPECT_EQ(Result::Denied, policy.claimRemoteCommand(alice, 100));
+  ASSERT_TRUE(policy.toggleRemoteParent(0, 2));
+  EXPECT_EQ(Result::Accepted, policy.claimRemoteCommand(alice, 100));
+  EXPECT_EQ(Result::Duplicate, policy.claimRemoteCommand(alice, 100));
+  EXPECT_EQ(Result::Stale, policy.applyRemote(alice, false, 99));
+  EXPECT_TRUE(policy.restricted());
+  storage.fail = true;
+  EXPECT_EQ(Result::SaveFailed, policy.applyRemote(alice, false, 101));
+  EXPECT_TRUE(policy.restricted());
+  storage.fail = false;
+  EXPECT_EQ(Result::Accepted, policy.applyRemote(alice, false, 101));
+  policy.begin(&storage, &rng, 0);
+  EXPECT_FALSE(policy.restricted());
+  EXPECT_EQ(Result::Duplicate, policy.claimRemoteCommand(alice, 101));
+}
+
+TEST_F(PolicyTest, SuccessfulLocalUnlockDoesNotDelayRemotePinChange) {
+  setup();
+  ASSERT_TRUE(policy.setAllowed(alice, true, 1));
+  policy.lock();
+  ASSERT_TRUE(policy.unlock("123456", 2));
+  ASSERT_TRUE(policy.toggleRemoteParent(0, 3));
+  policy.lock();
+  EXPECT_EQ(MessageAccessPolicy::RemoteResult::Accepted, policy.claimRemoteCommand(alice, 100));
+  ASSERT_TRUE(policy.unlock("123456", 4));
+  ASSERT_TRUE(policy.setPin("654321", 4));
+  policy.lock();
+  EXPECT_FALSE(policy.unlock("123456", 5));
+  EXPECT_EQ(30u, policy.waitSeconds(5));
+  EXPECT_TRUE(policy.unlock("654321", 30005));
+}
+
+
 namespace {
 struct ParentApp : mishmesh::AppServices {
   MessageAccessPolicy* policy;
@@ -159,8 +197,28 @@ TEST_F(PolicyTest, ParentScreenRequiresConfirmationAndLocksOnSleep) {
   ui.onInput(mishmesh::InputEvent::Select);
   ui.onInput(mishmesh::InputEvent::Select); // Dad
   EXPECT_TRUE(policy.allows(alice));
+  ui.onInput(mishmesh::InputEvent::Back); // finish adding contacts
+  EXPECT_STREQ("Child mode", ui.label(0));
+  EXPECT_TRUE(ui.toggleState(0));
+  ui.onInput(mishmesh::InputEvent::Select);
+  EXPECT_FALSE(policy.restricted());
+  ui.onInput(mishmesh::InputEvent::Select);
+  EXPECT_TRUE(policy.restricted());
+  ui.onInput(mishmesh::InputEvent::NavUp); // wrap to the allowed contact
+  ASSERT_EQ(5, ui.count());
+  EXPECT_TRUE(ui.isToggle(4));
+  EXPECT_FALSE(ui.toggleState(4));
+  EXPECT_STREQ("Dad [00000000]", ui.label(4));
+  ui.onInput(mishmesh::InputEvent::NavRight);
+  EXPECT_TRUE(ui.toggleState(4));
+  EXPECT_TRUE(policy.isRemoteParent(alice));
   mishmesh::Canvas canvas(&display);
-  ui.onRender(canvas); // exercise actual small-screen rendering
+  EXPECT_LE(canvas.textWidth(mishmesh::fontCaption(), "Right: Admin") +
+            canvas.textWidth(mishmesh::fontCaption(), "OK: Remove") + 8, 128);
+  ui.onRender(canvas);
+  ui.onInput(mishmesh::InputEvent::NavRight);
+  EXPECT_FALSE(ui.toggleState(4));
+  EXPECT_TRUE(policy.allows(alice));
   ui.onSleep();
   EXPECT_FALSE(policy.unlocked(0));
   EXPECT_FALSE(policy.setRestricted(false, 0));

@@ -32,12 +32,20 @@ void ParentControlsApplet::showMenu() {
 }
 int ParentControlsApplet::count() const {
   if (!_policy) return 0;
-  return _adding ? (_contacts ? _contacts->countByKind(ContactKind::Chat) + _contacts->countDiscovered() : 0) : 4 + _policy->count();
+  return _adding ? (_contacts ? _contacts->countByKind(ContactKind::Chat) + _contacts->countDiscovered() : 0) : CONTACT_START + _policy->count();
+}
+bool ParentControlsApplet::isToggle(int i) const {
+  return !_adding && (i == 0 || (i >= CONTACT_START && i < count()));
+}
+bool ParentControlsApplet::toggleState(int i) const {
+  if (!_policy || !isToggle(i)) return false;
+  if (i == 0) return _policy->restricted();
+  return _policy->isRemoteParent(_policy->keyAt(i - CONTACT_START));
 }
 const char* ParentControlsApplet::label(int i) const {
   if (!_policy) return "";
-  if (!_adding && i < 4) {
-    static const char* labels[] = {"Restricted messaging", "Add allowed contact", "Change PIN", "Lock parent controls"};
+  if (!_adding && i < CONTACT_START) {
+    static const char* labels[] = {"Child mode", "Add allowed contact", "Change PIN", "Lock parent controls"};
     return i >= 0 ? labels[i] : "";
   }
   ContactView v;
@@ -51,7 +59,7 @@ const char* ParentControlsApplet::label(int i) const {
     if (!found) return "";
     key = v.pubKey; name = v.name;
   } else {
-    key = _policy->keyAt(i - 4);
+    key = _policy->keyAt(i - CONTACT_START);
     if (!key) return "";
     if (_contacts) for (int j = 0; j < _contacts->countByKind(ContactKind::Chat); ++j) {
       if (_contacts->getByKind(ContactKind::Chat, j, v) && memcmp(key, v.pubKey, 32) == 0) {
@@ -60,23 +68,33 @@ const char* ParentControlsApplet::label(int i) const {
     }
   }
   snprintf(_label, sizeof(_label), "%s%.32s [%02X%02X%02X%02X]",
-           _adding ? (_policy->contains(key) ? "Allowed: " : "Add: ") : (_policy->isRemoteParent(key) ? "Remote: " : "Allowed: "),
+           _adding ? (_policy->contains(key) ? "Allowed: " : "Add: ") : "",
            name, key[28], key[29], key[30], key[31]);
   return _label;
 }
 int ParentControlsApplet::onRender(Canvas& c) {
   const int barH = c.fontHeight(fontBody()) + 3;
+  if (_stage == Menu && (!_policy || !_policy->unlocked(now()))) close();
+  const bool contactSelected = _stage == Menu && !_adding && _list.selected() >= CONTACT_START;
+  _bar.setTitle(contactSelected ? "Allowed contacts" : "Parent controls");
   _bar.setBattery(_app ? _app->batteryMillivolts() : 0);
   _bar.draw(c, 0, 0, c.width(), barH);
   if (!_policy || _policy->fault()) {
     c.drawText(fontBody(), 2, barH + 5, "Controls unavailable", DisplayDriver::LIGHT);
     return 1000;
   }
-  if (_stage == Menu && !_policy->unlocked(now())) close();
   if (_stage == Menu) {
     if (_adding && count() == 0)
       c.drawText(fontBody(), 2, barH + 5, "No chat contacts yet", DisplayDriver::LIGHT);
-    else _list.draw(c, 0, barH, c.width(), c.height() - barH);
+    else {
+      const int footerH = contactSelected ? c.fontHeight(fontCaption()) + 2 : 0;
+      _list.draw(c, 0, barH, c.width(), c.height() - barH - footerH);
+      if (contactSelected) {
+        const int footerY = c.height() - footerH + 1;
+        c.drawText(fontCaption(), 2, footerY, "Right: Admin", DisplayDriver::LIGHT);
+        c.drawText(fontCaption(), c.width() - 2, footerY, "OK: Remove", DisplayDriver::LIGHT, TextAlign::Right);
+      }
+    }
     return 100;
   }
   const char* title = _stage == NewPin ? "Set 6-digit parent PIN" :
@@ -121,11 +139,11 @@ bool ParentControlsApplet::onInput(InputEvent ev) {
     return true;
   }
   if (ev == InputEvent::Back && _adding) { showMenu(); return true; }
-  if (!_adding && ev == InputEvent::NavRight && _list.selected() >= 4) {
-    const int index = _list.selected() - 4;
+  if (!_adding && ev == InputEvent::NavRight && _list.selected() >= CONTACT_START) {
+    const int index = _list.selected() - CONTACT_START;
     bool saved = _policy->toggleRemoteParent(index, now());
     if (_host) _host->postToast(!saved ? "Not saved" :
-        _policy->isRemoteParent(_policy->keyAt(index)) ? "Remote parent set" : "Remote parent off");
+        toggleState(_list.selected()) ? "Admin access on" : "Admin access off");
     return true;
   }
   if (_list.onInput(ev)) return true;
@@ -150,7 +168,7 @@ bool ParentControlsApplet::onInput(InputEvent ev) {
   else if (row == 2) { resetPin(); _stage = NewPin; return true; }
   else if (row == 3) { close(); return true; }
   else {
-    const uint8_t* key = _policy->keyAt(row - 4);
+    const uint8_t* key = _policy->keyAt(row - CONTACT_START);
     if (key) ok = _policy->setAllowed(key, false, now());
     _list.resetSelection();
   }

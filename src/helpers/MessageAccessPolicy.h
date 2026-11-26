@@ -44,8 +44,9 @@ public:
   bool setAllowed(const uint8_t* key, bool allowed, uint32_t now);
   bool isRemoteParent(const uint8_t* key) const;
   bool toggleRemoteParent(int index, uint32_t now);
-  bool applyRemote(const uint8_t* key, bool restricted, uint32_t timestamp);
-  bool claimRemoteCommand(const uint8_t* key, uint32_t timestamp);
+  enum class RemoteResult { Accepted, Denied, Duplicate, Stale, SaveFailed };
+  RemoteResult applyRemote(const uint8_t* key, bool restricted, uint32_t timestamp);
+  RemoteResult claimRemoteCommand(const uint8_t* key, uint32_t timestamp);
   uint32_t revision() const { return _revision; }
 
 private:
@@ -54,5 +55,6 @@ private:
   mesh::RNG* _rng = nullptr;
   bool _configured = false, _fault = false, _unlocked = false;
   uint32_t _unlockUntil = 0, _attemptAt = 0, _revision = 0;
+  RemoteResult checkRemoteCommand(const uint8_t* key, uint32_t timestamp) const;
   bool commit(Record& next, bool notify = true);
 };

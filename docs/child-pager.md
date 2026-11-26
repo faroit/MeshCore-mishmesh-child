@@ -16,7 +16,7 @@ selected set; unsupported emojis still show a placeholder.
 2. Open **Apps → Parent controls** and choose a six-digit PIN. Up/down changes
    a digit; press selects the next digit and submits the sixth. Enter it again
    to confirm. Left/right moves between digits.
-3. Keep **Restricted messaging** enabled. Select **Add allowed contact** and
+3. Keep **Child mode** on. Select **Add allowed contact** and
    select the parent's chat contact. Existing contacts and recently heard adverts
    are available here; send an advert from the parent's device if it is missing.
    The key suffix next to the name helps distinguish devices with the same name.
@@ -25,8 +25,10 @@ selected set; unsupported emojis still show a placeholder.
 
 Up to 32 full public keys can be approved. Adding, importing, renaming or marking
 a contact as a favourite does not approve it. The parent menu also removes
-approved contacts, changes the PIN, and can disable restricted messaging.
-Unlocking the menu alone never disables message filtering.
+approved contacts and changes the PIN. **Child mode** switches the pager between
+the child home screen with restricted messaging and the regular Mishmesh
+interface. Turning it off keeps the allowlist and admin contact for the next
+time you turn it on. Unlocking the menu leaves the current mode active.
 
 The menu locks when it closes, sleeps, is covered by another screen, or after two
 minutes. Incorrect PINs incur a 30-second wait. There is also a 30-second wait
@@ -65,20 +67,20 @@ Use two to six nonempty choices within MeshCore's 160-byte message limit. Spaces
 around the prompt and answers are trimmed; UTF-8 text is preserved. Malformed
 questions remain ordinary messages. Only direct messages are interpreted.
 
-## Remote lock and unlock
+## Admin access and remote commands
 
-Enter the PIN in **Apps → Parent controls**. Highlight an approved contact
-and press Right to designate it as the remote parent. The entry starts with
-**Remote**. Press Right on that entry again to turn remote control off.
+Enter the PIN in **Apps → Parent controls**, highlight an allowed contact, and
+press Right to turn on its **Admin access** switch. An allowed contact can
+exchange messages with the pager. The one contact with Admin access can also
+change settings remotely. Press Right again to turn off Admin access for that
+contact.
 
-From that contact, send `!parent lock` to enable restricted messaging or
-`!parent unlock` to disable it. Use a direct message. These commands change
-the mode without opening the PIN-protected settings.
-
-The same remote parent can send these direct messages:
+Send these commands as ordinary direct messages from the admin contact. The
+older `!parent lock` and `!parent unlock` commands also work.
 
 | Command | Effect |
 | --- | --- |
+| `!child on` / `!child off` | Turns Child mode on or off. The admin contact can send this command in either mode. |
 | `!pin <old> <new>` | Changes the six-digit parent PIN. The sending app may retain both PINs in its sent history. |
 | `!tz <minutes>` | Sets a fixed UTC offset in 15-minute increments, from −720 to +840. |
 | `!preset <n> <text>` | Updates quick reply n or appends at the next available slot, up to 10. Omit the text to remove that entry and shift later entries up. |
@@ -87,14 +89,20 @@ The same remote parent can send these direct messages:
 | `!gps on` / `!gps off` | Controls the GPS receiver. The local GPS toggle is unavailable while restrictions are active. |
 | `!sound low\|mid\|high\|mute` | Sets system volume, including call bells and message timers. Send one level, for example `!sound low`. The child can also adjust volume locally. |
 
-The pager handles these commands silently.
+The pager replies by direct message with the result of each setting command.
+Replies to PIN changes never include either PIN. An allowed contact with
+Admin access off gets a setup reminder when it sends a command. If the pager reports that the
+sender's time is out of date, sync the sending radio's clock and send a fresh
+message.
 
 ## Timer requests
 
 Send `%Please come in | 5m` as a direct message. The pager shows the prompt
 above a large `5:00`. Press Select to start the countdown or Back to dismiss
 the request. When the countdown ends, the pager opens its timer alarm, even
-if the display is asleep.
+if the display is asleep. The pager replies to the sender with
+`Timer started: Please come in` and then `Timer finished: Please come in`.
+Dismissing a request before starting it sends `Timer dismissed: Please come in`.
 
 Use a whole number followed by `s`, `m`, or `h` (up to eight hours).
 The text before the separator is the timer name. After Select, the pager
@@ -128,9 +136,9 @@ follows system volume. System mute silences all of these choices.
 
 ## Delivery
 
-On-device direct messages, including question answers and bell replies, retry
-until acknowledged while the device remains running. Delays start with the
-estimated route timeout, double, and cap at three minutes. Heard radio traffic
+On-device direct messages, including question answers, bell replies, and timer
+status updates, retry until acknowledged while the device remains running.
+Delays start with the estimated route timeout, double, and cap at three minutes. Heard radio traffic
 can bring a retry forward, with at least three seconds between attempts. Hearing
 the recipient's advert schedules a retry with a fresh flood route. Route recovery
 also runs every second retry. Per-chat regions apply to retransmissions.

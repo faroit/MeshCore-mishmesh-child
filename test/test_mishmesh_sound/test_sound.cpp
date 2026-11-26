@@ -134,6 +134,20 @@ TEST(SoundEngine, MasterMuteAndCategoryDisableSuppress) {
   EXPECT_TRUE(eng.playRtttl(kBeep, SoundCategory::Notification));
 }
 
+TEST(SoundEngine, MasterMuteCancelsQueuedAndRejectsFixedVolumeAlerts) {
+  FakeToneOutput out;
+  SoundEngine eng;
+  eng.begin(&out);
+  ASSERT_TRUE(eng.play(SoundId::AlarmRing, VolumeLevel::High));
+  eng.setMasterMute(true);
+  EXPECT_FALSE(eng.isPlaying());
+  EXPECT_FALSE(eng.play(SoundId::AlarmRing, VolumeLevel::High));
+  eng.tick(0);
+  for (const auto& call : out.calls) EXPECT_TRUE(call.silence);
+  eng.setMasterMute(false);
+  EXPECT_TRUE(eng.play(SoundId::AlarmRing, VolumeLevel::High));
+}
+
 TEST(SoundEngine, ExclusiveLockSuppressesNonGame) {
   FakeToneOutput out;
   SoundEngine eng; eng.begin(&out);

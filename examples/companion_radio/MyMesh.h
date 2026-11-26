@@ -350,11 +350,12 @@ protected:
   }
 
 public:
-  void savePrefs() {
+  bool savePrefs() {
     _prefs.node_lat = sensors.node_lat;
     _prefs.node_lon = sensors.node_lon;
-    _store->savePrefs(_prefs);
-    _prefs.clearDirty();
+    const bool saved = _store->savePrefs(_prefs);
+    if (saved) _prefs.clearDirty();
+    return saved;
   }
 
   // [mishmesh] storage stats for the on-device System screen

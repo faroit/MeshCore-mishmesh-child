@@ -590,14 +590,14 @@ void MyMesh::sendFloodScoped(const mesh::GroupChannel& channel, mesh::Packet* pk
 void MyMesh::onMessageRecv(const ContactInfo &from, mesh::Packet *pkt, uint32_t sender_timestamp,
                            const char *text) {
   markConnectionActive(from); // in case this is from a server, and we have a connection
+  if (_listener && from.type == ADV_TYPE_CHAT && text[0] == '!' &&
+      _listener->onParentCommand(from, sender_timestamp, text)) return;
   const bool lockRequested = strcmp(text, "!parent lock") == 0;
   if (lockRequested || strcmp(text, "!parent unlock") == 0) {
     if (from.type == ADV_TYPE_CHAT)
       _message_access.applyRemote(from.id.pub_key, lockRequested, sender_timestamp);
     return;
   }
-  if (_listener && from.type == ADV_TYPE_CHAT && text[0] == '!' &&
-      _listener->onParentCommand(from, sender_timestamp, text)) return;
   queueMessage(from, TXT_TYPE_PLAIN, pkt, sender_timestamp, NULL, 0, text);
 }
 

@@ -54,13 +54,15 @@ uint32_t MessageAccessPolicy::waitSeconds(uint32_t now) const {
 bool MessageAccessPolicy::unlock(const char* pin, uint32_t now) {
   if (!_configured || _fault || waitSeconds(now) || !validPin(pin)) return false;
   _unlocked = false;
-  _attemptAt = now + 30000;
   uint8_t hash[32];
   mesh::Utils::sha256(hash, 32, _record.salt, 16, reinterpret_cast<const uint8_t*>(pin), 6);
   uint8_t diff = 0;
   for (int i = 0; i < 32; ++i) diff |= hash[i] ^ _record.pinHash[i];
   memset(hash, 0, sizeof(hash));
-  if (diff) return false;
+  if (diff) {
+    _attemptAt = now + 30000;
+    return false;
+  }
   _unlocked = true;
   _unlockUntil = now + 120000;
   return true;
@@ -130,19 +132,31 @@ bool MessageAccessPolicy::toggleRemoteParent(int index, uint32_t now) {
   return commit(next);
 }
 
-bool MessageAccessPolicy::applyRemote(const uint8_t* key, bool restricted, uint32_t timestamp) {
-  if (!isRemoteParent(key) || timestamp <= _record.remoteTimestamp) return false;
+MessageAccessPolicy::RemoteResult MessageAccessPolicy::checkRemoteCommand(
+    const uint8_t* key, uint32_t timestamp) const {
+  if (!isRemoteParent(key)) return RemoteResult::Denied;
+  if (!timestamp || timestamp < _record.remoteTimestamp) return RemoteResult::Stale;
+  if (timestamp == _record.remoteTimestamp) return RemoteResult::Duplicate;
+  return RemoteResult::Accepted;
+}
+
+MessageAccessPolicy::RemoteResult MessageAccessPolicy::applyRemote(
+    const uint8_t* key, bool restricted, uint32_t timestamp) {
+  const auto result = checkRemoteCommand(key, timestamp);
+  if (result != RemoteResult::Accepted) return result;
   Record next = _record;
   next.enabled = restricted;
   next.remoteTimestamp = timestamp;
-  if (!commit(next)) return false;
+  if (!commit(next)) return RemoteResult::SaveFailed;
   lock();
-  return true;
+  return RemoteResult::Accepted;
 }
 
-bool MessageAccessPolicy::claimRemoteCommand(const uint8_t* key, uint32_t timestamp) {
-  if (!isRemoteParent(key) || timestamp <= _record.remoteTimestamp) return false;
+MessageAccessPolicy::RemoteResult MessageAccessPolicy::claimRemoteCommand(
+    const uint8_t* key, uint32_t timestamp) {
+  const auto result = checkRemoteCommand(key, timestamp);
+  if (result != RemoteResult::Accepted) return result;
   Record next = _record;
   next.remoteTimestamp = timestamp;
-  return commit(next, false);
+  return commit(next, false) ? RemoteResult::Accepted : RemoteResult::SaveFailed;
 }

@@ -3,6 +3,7 @@
 #include <mishmesh/core/CallBell.h>
 #include <mishmesh/applets/QuestionApplet.h>
 #include <mishmesh/applets/CallBellApplet.h>
+#include <mishmesh/applets/TimerRequestApplet.h>
 #include <mishmesh/applets/MessageThreadApplet.h>
 #include <mishmesh/core/AppletHost.h>
 #include <mishmesh/core/Canvas.h>
@@ -22,6 +23,10 @@ struct Storage : AppletStorage {
   bool save(const char* key, const uint8_t* src, uint8_t len) override {
     data[key] = std::vector<uint8_t>(src, src + len); return true;
   }
+};
+struct TestRoot : Applet {
+  TestRoot() : Applet("Test root") {}
+  int onRender(Canvas&) override { return 0; }
 };
 struct Messages : FakeMessagesService {
   bool fail = false;
@@ -135,6 +140,94 @@ TEST(CallBell, QueueIsBoundedAndChannelsRejected) {
   for (int i = 0; i < 4; ++i) EXPECT_TRUE(bell.enqueue(dad, i, "Dad"));
   EXPECT_FALSE(bell.enqueue(dad, 5, "Dad"));
 }
+TEST(TimerRequests, RepliesToOriginalSenderOnStartAndFinishAfterHiding) {
+  Messages svc;
+  FakeDisplayDriver display;
+  AppletContext ctx; ctx.messages = &svc;
+  TestRoot root;
+  AppletHost host(&display, ctx);
+  host.setRoot(&root);
+  TimerRequestApplet timer;
+  const char* first = "%Please come in | 5s";
+  const char* next = "%Dinner | 1m";
+  receive(svc, dad, first);
+  receive(svc, mom, next, 124);
+  ASSERT_TRUE(timer.enqueue(dad, 123, first));
+  ASSERT_TRUE(timer.enqueue(mom, 124, next));
+  host.push(&timer);
+  host.loop(1000);
+  host.dispatch(InputEvent::Select);
+  EXPECT_EQ(1, svc.sends);
+  EXPECT_TRUE(svc.lastSentKey.equals(dad));
+  EXPECT_EQ("Timer started: Please come in", svc.lastSent);
+
+  host.dispatch(InputEvent::Back);
+  EXPECT_FALSE(timer.isOpen());
+  EXPECT_FALSE(timer.tick(5999));
+  EXPECT_EQ(1, svc.sends);
+  EXPECT_TRUE(timer.tick(6000));
+  EXPECT_FALSE(timer.tick(6001));
+  EXPECT_EQ(2, svc.sends);
+  EXPECT_TRUE(svc.lastSentKey.equals(dad));
+  EXPECT_EQ("Timer finished: Please come in", svc.lastSent);
+
+  host.push(&timer);
+  host.dispatch(InputEvent::Select); // close the finished alarm
+  EXPECT_EQ(2, svc.sends);
+  host.push(&timer);
+  host.dispatch(InputEvent::Back); // dismiss the next request
+  EXPECT_EQ(3, svc.sends);
+  EXPECT_TRUE(svc.lastSentKey.equals(mom));
+  EXPECT_EQ("Timer dismissed: Dinner", svc.lastSent);
+  EXPECT_FALSE(timer.pending());
+}
+
+TEST(TimerRequests, RetriesTemporarySendFailureWithoutDelayingCountdown) {
+  Messages svc;
+  FakeDisplayDriver display;
+  AppletContext ctx; ctx.messages = &svc;
+  TestRoot root;
+  AppletHost host(&display, ctx);
+  host.setRoot(&root);
+  TimerRequestApplet timer;
+  const char* request = "%Snack | 1s";
+  receive(svc, dad, request);
+  ASSERT_TRUE(timer.enqueue(dad, 123, request));
+  host.push(&timer);
+  host.loop(1000);
+  svc.fail = true;
+  host.dispatch(InputEvent::Select);
+  EXPECT_TRUE(timer.tick(2000));
+  EXPECT_EQ(0, svc.sends);
+  svc.fail = false;
+  EXPECT_FALSE(timer.tick(3000));
+  ASSERT_EQ(2, svc.sends);
+
+  MessageView msg;
+  ASSERT_TRUE(svc.getMessage(dad, 1, msg));
+  EXPECT_STREQ("Timer started: Snack", msg.text);
+  ASSERT_TRUE(svc.getMessage(dad, 2, msg));
+  EXPECT_STREQ("Timer finished: Snack", msg.text);
+}
+
+TEST(TimerRequests, LongUtf8NameFitsTheReplyLimit) {
+  Messages svc;
+  FakeDisplayDriver display;
+  AppletContext ctx; ctx.messages = &svc;
+  TestRoot root;
+  AppletHost host(&display, ctx);
+  host.setRoot(&root);
+  TimerRequestApplet timer;
+  const std::string title = std::string(142, 'a') + "🍕 and more";
+  const std::string request = "%" + title + "|1s";
+  receive(svc, dad, request.c_str());
+  ASSERT_TRUE(timer.enqueue(dad, 123, request.c_str()));
+  host.push(&timer);
+  host.dispatch(InputEvent::Back);
+  EXPECT_EQ("Timer dismissed: " + std::string(142, 'a'), svc.lastSent);
+  EXPECT_LE(svc.lastSent.size(), size_t(MAX_TEXT));
+}
+
 TEST(ChildPagerStore, RetriesMatchTimestampAndBodyWithoutHidingNewMessages) {
   Messages svc; receive(svc, dad, "🔔");
   EXPECT_TRUE(svc.store.hasInbound(dad, 123, "🔔", strlen("🔔")));

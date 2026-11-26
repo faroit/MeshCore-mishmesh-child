@@ -23,7 +23,8 @@ void AppMenuApplet::onForeground() {
   _count = 0;
   for (const AppletRegistration* r = registeredApplets(); r; r = r->next) {
     if (r->placement != Placement::AppMenu || _count >= MAX_ENTRIES) continue;
-    if (access && access->restricted() && strcmp(r->label, "2048") == 0) continue;
+    if (access && access->restricted() &&
+        (strcmp(r->label, "2048") == 0 || strcmp(r->label, "Settings") == 0)) continue;
     int i = _count++;
     while (i > 0 && _entries[i - 1]->order > r->order) {
       _entries[i] = _entries[i - 1];

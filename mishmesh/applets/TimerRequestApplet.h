@@ -29,8 +29,14 @@ private:
     char prompt[161];
     AlertSound alert;
   };
+  struct StatusReply {
+    ConvoKey key;
+    uint32_t expiresAt;
+    char text[MAX_TEXT + 1];
+  };
   enum class State { Idle, Running, Done };
   State _state = State::Idle;
+  ConvoKey _timerSender{};
   char _timerName[161]{};
   AlertSound _timerSound;
   uint32_t _deadline = 0;
@@ -39,6 +45,9 @@ private:
   bool _ringed = false;
   Request _requests[4]{};
   int _count = 0;
+  StatusReply _replies[8]{};
+  int _replyCount = 0;
+  uint32_t _nextReplyAttempt = 0;
   bool _open = false;
   bool _announce = true;
   AppletHost* _host = nullptr;
@@ -47,6 +56,8 @@ private:
   Marquee _prompt;
 
   bool available() const;
+  void sendStatus(const ConvoKey& key, const char* name, const char* status, uint32_t now);
+  void retryStatusReplies(uint32_t now);
   void removeRequest();
   void advance();
 };

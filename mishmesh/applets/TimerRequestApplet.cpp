@@ -57,9 +57,52 @@ void TimerRequestApplet::advance() {
   else _host->requestRender();
 }
 
+void TimerRequestApplet::sendStatus(const ConvoKey& key, const char* name, const char* status,
+                                   uint32_t now) {
+  char text[MAX_TEXT + 1];
+  const int prefix = snprintf(text, sizeof(text), "Timer %s: ", status);
+  size_t nameBytes = strlen(name);
+  // Use the same title in every update, even when it needs to be shortened.
+  constexpr size_t limit = MAX_TEXT - (sizeof("Timer dismissed: ") - 1);
+  if (nameBytes > limit) {
+    nameBytes = limit;
+    while (nameBytes && (static_cast<uint8_t>(name[nameBytes]) & 0xc0) == 0x80) --nameBytes;
+  }
+  memcpy(text + prefix, name, nameBytes);
+  text[prefix + nameBytes] = 0;
+
+  if (!_replyCount && _messages->sendText(key, text)) return;
+  if (_replyCount == static_cast<int>(sizeof(_replies) / sizeof(_replies[0]))) {
+    _host->postToast("Timer reply queue full");
+    return;
+  }
+  if (!_replyCount) _nextReplyAttempt = now + 1000;
+  StatusReply& reply = _replies[_replyCount++];
+  reply.key = key;
+  reply.expiresAt = now + 180000;
+  memcpy(reply.text, text, prefix + nameBytes + 1);
+}
+
+void TimerRequestApplet::retryStatusReplies(uint32_t now) {
+  if (!_replyCount || int32_t(now - _nextReplyAttempt) < 0) return;
+  _nextReplyAttempt = now + 1000;
+  // After the normal send succeeds, the mesh's DM retry engine owns delivery.
+  int consumed = 0;
+  while (consumed < _replyCount) {
+    const StatusReply& reply = _replies[consumed];
+    if (int32_t(now - reply.expiresAt) < 0 && !_messages->sendText(reply.key, reply.text)) break;
+    ++consumed;
+  }
+  if (!consumed) return;
+  for (int i = consumed; i < _replyCount; ++i) _replies[i - consumed] = _replies[i];
+  _replyCount -= consumed;
+}
+
 bool TimerRequestApplet::tick(uint32_t now) {
+  retryStatusReplies(now);
   if (_state != State::Running || int32_t(now - _deadline) < 0) return false;
   _state = State::Done;
+  sendStatus(_timerSender, _timerName, "finished", now);
   _ringed = false;
   _prompt.reset();
   return true;
@@ -130,13 +173,19 @@ bool TimerRequestApplet::onInput(InputEvent ev) {
     return true;
   }
   if (ev == InputEvent::Back || ev == InputEvent::Cancel || ev == InputEvent::NavLeft) {
+    if (available())
+      sendStatus(_requests[0].key, _requests[0].prompt, "dismissed", _host->nowMs());
     advance();
   } else if (ev == InputEvent::Select) {
     if (!available()) { advance(); return true; }
-    memcpy(_timerName, _requests[0].prompt, sizeof(_timerName));
-    _timerSound = _requests[0].alert;
-    _deadline = _host->nowMs() + _requests[0].seconds * 1000u;
+    const Request& request = _requests[0];
+    const uint32_t now = _host->nowMs();
+    _timerSender = request.key;
+    memcpy(_timerName, request.prompt, sizeof(_timerName));
+    _timerSound = request.alert;
+    _deadline = now + request.seconds * 1000u;
     _state = State::Running;
+    sendStatus(_timerSender, _timerName, "started", now);
     removeRequest();
     _host->requestRender();
   }

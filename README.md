@@ -20,9 +20,9 @@ parent-to-child communication.
 
 ### Child pager features
 
-- **Parent controls:** a PIN-protected allowlist controls who can message the
-  child. Unknown contacts and public channels are blocked while restrictions
-  are enabled.
+- **Parent controls:** a PIN-protected **Child mode** switch enables the simpler
+  pager interface and limits messaging to allowed contacts. Unknown contacts and
+  public channels are blocked in Child mode.
 - **Home:** press Left for Messages or Right for the latest approved chat.
   The chat opens at its newest unread message when one is available.
 - **Questions:** send a prompt such as `?Dinner | Pizza | Pasta`; the child
@@ -31,9 +31,9 @@ parent-to-child communication.
 - **Named timers:** send `%Please come in | 5m`. Accepting shows a large
   countdown, and the alarm shows the original name. The manual Clock timer
   can run at the same time. Chats show the question prompt or timer name.
-- **Remote controls:** designate an approved contact to control parental mode,
-  GPS, volume, retries, quick replies, the PIN, and the time zone by direct
-  message. GPS controls are unavailable to the child while restrictions are active.
+- **Admin access:** give one allowed contact permission to change settings by
+  direct message. Use `!child on` or `!child off` to switch modes. Admin commands
+  also cover GPS, volume, retries, quick replies, the PIN, and the time zone.
 - **Call bell:** send one `🔔` to ring the pager and show that Dad is calling.
   The child can reply with `👋 here` from a key press. Add
   `| chime | low` to choose a tone and volume for a bell or timer.

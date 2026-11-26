@@ -310,13 +310,8 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
 
   // bring up the sound subsystem and restore persisted prefs.
   _sound.begin(mishmesh::sound::defaultToneOutput());
-  _sound.setVolume((mishmesh::sound::VolumeLevel)_node_prefs->sound_volume);
+  applySystemVolume(_node_prefs->sound_volume);
   _sound.setCategoryMask(_node_prefs->sound_mute_mask);
-  // Master mute is intentionally NOT restored from the legacy buzzer_quiet pref:
-  // mishmesh has no on-device mute toggle yet, so honoring a stale muted flag left by a
-  // previously-flashed firmware would strand the device silent with no way to unmute.
-  // Default audible; a future mishmesh sound-settings screen will own master mute.
-  _sound.setMasterMute(false);
   mishmesh::sound::setActiveEngine(&_sound);
 
   mishmesh::AppletContext ctx;
@@ -416,89 +411,210 @@ void UITask::onMessageRecv(mesh::Packet* /*pkt*/, const ContactInfo& from, uint8
   if (!hasConnection() || questionReceived) notify(UIEventType::contactMessage);
 }
 
-// Child-companion command syntax, adapted to mishmesh settings and the
-// locally designated remote parent. Commands are consumed before chat storage.
+void UITask::applySystemVolume(uint8_t level) {
+  using mishmesh::sound::VolumeLevel;
+  const auto volume = static_cast<VolumeLevel>(level);
+  _sound.setVolume(volume);
+#ifdef MISHMESH_CHILD
+  // A fixed-volume alarm or preview must also respect the pager's Mute.
+  _sound.setMasterMute(volume == VolumeLevel::Mute);
+#else
+  if (volume == VolumeLevel::Mute) _sound.stop();
+#endif
+}
+
+bool UITask::applySoundVolume(uint8_t level) {
+  applySystemVolume(level);
+  NodePrefs* prefs = the_mesh.getNodePrefs();
+  if (!prefs) return false;
+  prefs->sound_volume = level;
+  return the_mesh.savePrefs();
+}
+
+bool UITask::applyGpsEnabled(bool on) {
+  if (!gpsSupported()) return false;
+  if (gpsEnabled() != on && !_sensors->setSettingValue("gps", on ? "1" : "0")) return false;
+  NodePrefs* prefs = the_mesh.getNodePrefs();
+  if (!prefs) return false;
+  prefs->gps_enabled = on ? 1 : 0;
+  return the_mesh.savePrefs();
+}
+
+void UITask::replyToParent(const ContactInfo& from, const char* text) {
+  // The chat send API uses a six-byte conversation key. Check that it resolves
+  // to the same authenticated sender before giving it a command reply.
+  if (the_mesh.lookupContactByPubKey(from.id.pub_key, 6) != &from) return;
+  if (_msgSvc.sendText(mishmesh::directKey(from.id.pub_key), text))
+    _msgFlushAt = millis() + 8000;
+}
+
+// Commands are consumed before chat storage, including when the PIN is wrong.
 bool UITask::onParentCommand(const ContactInfo& from, uint32_t timestamp, const char* text) {
-  enum Command { Pin, Timezone, Preset, Name, Retry, Gps, Sound };
-  static const char* names[] = {"!pin", "!tz", "!preset", "!name", "!retry", "!gps", "!sound"};
-  const char* args = strchr(text, ' ');
-  const size_t size = args ? size_t(args - text) : strlen(text);
+  enum Command { Child, Parent, Pin, Timezone, Preset, Name, Retry, Gps, Sound };
+  static const char* names[] = {"!child", "!parent", "!pin", "!tz", "!preset", "!name", "!retry", "!gps", "!sound"};
+  static const char* levels[] = {"mute", "low", "mid", "high"};
+  const size_t size = strcspn(text, " \t\r\n");
   unsigned command = 0;
   for (; command < sizeof(names) / sizeof(names[0]); ++command)
     if (strlen(names[command]) == size && memcmp(text, names[command], size) == 0) break;
   if (command == sizeof(names) / sizeof(names[0])) return false;
 
   auto& policy = the_mesh.messageAccess();
-  if (!_host || !args || !policy.isRemoteParent(from.id.pub_key)) return true;
-  while (*args == ' ') ++args;
+  if (!_host || !policy.contains(from.id.pub_key)) return true;
+  if (!policy.isRemoteParent(from.id.pub_key)) {
+    replyToParent(from, "Command denied. Turn on Admin access for this contact in Parent controls.");
+    return true;
+  }
+
+  const char* args = text + size;
+  args += strspn(args, " \t");
+  const size_t wordLength = strcspn(args, " \t\r\n");
+  const bool oneWord = !args[wordLength + strspn(args + wordLength, " \t\r\n")];
+  auto wordIs = [&](const char* word) {
+    return oneWord && strlen(word) == wordLength && strncasecmp(args, word, wordLength) == 0;
+  };
+
+  const char* newPinStart = nullptr;
   char* end = nullptr;
   long number = 0;
   unsigned volume = 0;
   bool enabled = false;
+  bool valid = true;
   switch (command) {
-    case Pin:
-      if (strlen(args) != 13 || args[6] != ' ' ||
-          strspn(args, "0123456789") != 6 || strspn(args + 7, "0123456789") != 6) return true;
+    case Parent:
+      enabled = wordIs("lock");
+      valid = enabled || wordIs("unlock");
       break;
+    case Pin: {
+      const size_t oldLength = strspn(args, "0123456789");
+      const size_t separator = strspn(args + oldLength, " \t");
+      newPinStart = args + oldLength + separator;
+      const size_t newLength = strspn(newPinStart, "0123456789");
+      valid = oldLength == 6 && separator > 0 && newLength == 6 &&
+              !newPinStart[newLength + strspn(newPinStart + newLength, " \t\r\n")];
+      break;
+    }
     case Timezone:
       number = strtol(args, &end, 10);
-      if (end == args || *end || number < -720 || number > 840 || number % 15 != 0) return true;
+      valid = end != args && oneWord && size_t(end - args) == wordLength &&
+              number >= -720 && number <= 840 && number % 15 == 0;
       break;
     case Preset:
       number = strtol(args, &end, 10);
-      if (number < 1 || number > mishmesh::QuickReplyStore::MAX_ITEMS ||
-          (*end && *end != ' ')) return true;
-      args = end;
-      while (*args == ' ') ++args;
-      if (strlen(args) > mishmesh::QuickReplyStore::MAX_LEN) return true;
+      valid = end != args && number >= 1 && number <= mishmesh::QuickReplyStore::MAX_ITEMS &&
+              (!*end || *end == ' ' || *end == '\t');
+      args = end + strspn(end, " \t");
+      valid = valid && strlen(args) <= mishmesh::QuickReplyStore::MAX_LEN;
       break;
     case Name:
-      if (!*args || strlen(args) >= sizeof(from.name)) return true;
+      valid = *args && strlen(args) < sizeof(from.name);
       break;
+    case Child:
     case Retry:
     case Gps:
-      enabled = strcmp(args, "on") == 0;
-      if (!enabled && strcmp(args, "off") != 0) return true;
+      enabled = wordIs("on");
+      valid = enabled || wordIs("off");
       break;
-    case Sound: {
-      static const char* levels[] = {"mute", "low", "mid", "high"};
-      const size_t length = strcspn(args, " \t\r\n");
-      if (args[length + strspn(args + length, " \t\r\n")]) return true;
-      while (volume < 4 &&
-             (strlen(levels[volume]) != length || strncasecmp(args, levels[volume], length) != 0))
-        ++volume;
-      if (volume == 4) return true;
+    case Sound:
+      while (volume < sizeof(levels) / sizeof(levels[0]) && !wordIs(levels[volume])) ++volume;
+      valid = volume < sizeof(levels) / sizeof(levels[0]);
       break;
-    }
+  }
+  if (!valid) {
+    char reply[48];
+    snprintf(reply, sizeof(reply), "Invalid arguments for %s.", names[command]);
+    replyToParent(from, reply);
+    return true;
   }
 
-  if (!policy.claimRemoteCommand(from.id.pub_key, timestamp)) return true;
+  using RemoteResult = MessageAccessPolicy::RemoteResult;
+  const bool changesMode = command == Child || command == Parent;
+  const auto result = changesMode ? policy.applyRemote(from.id.pub_key, enabled, timestamp)
+                                  : policy.claimRemoteCommand(from.id.pub_key, timestamp);
+  switch (result) {
+    case RemoteResult::Denied:
+    case RemoteResult::Duplicate:
+      return true;
+    case RemoteResult::Stale:
+      replyToParent(from, "Command ignored. Sync the sender's clock and send a new message.");
+      return true;
+    case RemoteResult::SaveFailed:
+      replyToParent(from, "Command failed. The pager could not save its command history.");
+      return true;
+    case RemoteResult::Accepted:
+      break;
+  }
+
+  char reply[64];
   switch (command) {
+    case Child:
+    case Parent:
+      snprintf(reply, sizeof(reply), "Child mode %s.", enabled ? "on" : "off");
+      break;
     case Pin: {
-      char oldPin[7];
+      char oldPin[7] = {};
+      char newPin[7] = {};
       memcpy(oldPin, args, 6);
-      oldPin[6] = 0;
+      memcpy(newPin, newPinStart, 6);
       const uint32_t now = millis();
-      if (policy.unlock(oldPin, now)) {
-        policy.setPin(args + 7, now);
+      const auto wait = policy.waitSeconds(now);
+      if (wait) {
+        snprintf(reply, sizeof(reply), "PIN unchanged. Try again in %lu seconds.", (unsigned long)wait);
+      } else if (!policy.unlock(oldPin, now)) {
+        snprintf(reply, sizeof(reply), "PIN unchanged. Current PIN did not match.");
+      } else {
+        const bool saved = policy.setPin(newPin, now);
         policy.lock();
+        snprintf(reply, sizeof(reply), "%s", saved ? "Parent PIN changed." : "PIN unchanged. Save failed.");
       }
       break;
     }
-    case Timezone: setTzOffsetMinutes(number); break;
+    case Timezone:
+      if (applyTzOffsetMinutes(number))
+        snprintf(reply, sizeof(reply), "Time zone set to UTC%+ld minutes.", number);
+      else
+        snprintf(reply, sizeof(reply), "Time zone save failed.");
+      break;
     case Preset: {
       auto& replies = mishmesh::quickReplyStore();
       const int slot = int(number) - 1;
-      if (!*args) replies.remove(slot);
-      else if (slot == replies.count()) replies.add(args);
-      else replies.set(slot, args);
+      const bool changed = !*args ? replies.remove(slot) :
+                           slot == replies.count() ? replies.add(args) : replies.set(slot, args);
+      if (changed)
+        snprintf(reply, sizeof(reply), "Preset %ld %s.", number, *args ? "updated" : "removed");
+      else
+        snprintf(reply, sizeof(reply), "Preset %ld could not be changed.", number);
       break;
     }
-    case Name: renameContact(from.id.pub_key, args); break;
-    case Retry: _msgSvc.setRemoteRetry(enabled); break;
-    case Gps: applyGpsEnabled(enabled); break;
-    case Sound: setSoundVolume(volume); break;
+    case Name:
+      if (the_mesh.lookupContactByPubKey(from.id.pub_key, 6) == &from &&
+          renameContact(from.id.pub_key, args))
+        snprintf(reply, sizeof(reply), "Parent contact name: %s.", args);
+      else
+        snprintf(reply, sizeof(reply), "Parent contact could not be renamed.");
+      break;
+    case Retry:
+      if (_msgSvc.setRemoteRetry(enabled))
+        snprintf(reply, sizeof(reply), "Automatic retries %s.", enabled ? "on" : "off");
+      else
+        snprintf(reply, sizeof(reply), "Retry setting could not be saved.");
+      break;
+    case Gps:
+      if (!gpsSupported())
+        snprintf(reply, sizeof(reply), "GPS receiver unavailable.");
+      else if (applyGpsEnabled(enabled))
+        snprintf(reply, sizeof(reply), "GPS %s.", enabled ? "on" : "off");
+      else
+        snprintf(reply, sizeof(reply), "GPS setting could not be applied or saved.");
+      break;
+    case Sound:
+      if (applySoundVolume(volume))
+        snprintf(reply, sizeof(reply), "Sound set to %s.", levels[volume]);
+      else
+        snprintf(reply, sizeof(reply), "Sound set to %s for now. Save failed.", levels[volume]);
+      break;
   }
+  replyToParent(from, reply);
   _host->requestRender();
   return true;
 }
@@ -1437,11 +1553,13 @@ mishmesh::MessagesConfig UITask::MsgSvc::getMessagesConfig() const {
   return c;
 }
 
-void UITask::MsgSvc::setRemoteRetry(bool enabled) {
+bool UITask::MsgSvc::setRemoteRetry(bool enabled) {
   getMessagesConfig();  // load the saved flags before changing a single setting
   uint8_t flags = (_msgFlags & ~MSGCFG_AUTO_RETRY) | MSGCFG_REMOTE_RETRY;
   if (enabled) flags |= MSGCFG_AUTO_RETRY;
-  if (storage && storage->save("msgcfg", &flags, 1)) _msgFlags = flags;
+  if (!storage || !storage->save("msgcfg", &flags, 1)) return false;
+  _msgFlags = flags;
+  return true;
 }
 
 void UITask::MsgSvc::setMessagesConfig(const mishmesh::MessagesConfig& c) {

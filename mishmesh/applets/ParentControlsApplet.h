@@ -17,9 +17,10 @@ public:
   bool onInput(InputEvent ev) override;
   int count() const override;
   const char* label(int i) const override;
-  bool isToggle(int i) const override { return !_adding && i == 0; }
-  bool toggleState(int) const override { return _policy && _policy->restricted(); }
+  bool isToggle(int i) const override;
+  bool toggleState(int i) const override;
 private:
+  static constexpr int CONTACT_START = 4;
   enum Stage { EnterPin, NewPin, ConfirmPin, Menu } _stage = EnterPin;
   AppletHost* _host = nullptr;
   AppServices* _app = nullptr;

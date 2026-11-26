@@ -116,7 +116,7 @@ class UITask : public AbstractUITask, public mishmesh::AppServices, public mishm
     mishmesh::WakeOverride chatWake(const mishmesh::ConvoKey& k) const override;
     void setChatWake(const mishmesh::ConvoKey& k, mishmesh::WakeOverride v) override;
     mishmesh::MessagesConfig getMessagesConfig() const override;
-    void setRemoteRetry(bool enabled);
+    bool setRemoteRetry(bool enabled);
     void setMessagesConfig(const mishmesh::MessagesConfig& cfg) override;
     mishmesh::ChanResult createPrivateChannel(const char* name) override;
     mishmesh::ChanResult joinPrivateChannel(const char* name, const char* keyHex) override;
@@ -285,15 +285,7 @@ public:
     mishmeshBatteryCalFactor = mishmesh::uiPrefs().battCalPercent() / 100.0f;
   }
   uint16_t batteryMillivoltsLive() const override { return getBattMilliVolts(); }
-  void setSoundVolume(uint8_t level) override {
-    const auto volume = static_cast<mishmesh::sound::VolumeLevel>(level);
-    _sound.setVolume(volume);
-    if (volume == mishmesh::sound::VolumeLevel::Mute) _sound.stop();
-    NodePrefs* p = the_mesh.getNodePrefs();
-    if (!p) return;
-    p->sound_volume = level;
-    the_mesh.savePrefs();
-  }
+  void setSoundVolume(uint8_t level) override { applySoundVolume(level); }
   uint8_t notifyTone(bool channel) const override {
     return _node_prefs ? (channel ? _node_prefs->notify_tone_ch : _node_prefs->notify_tone_dm) : 0;
   }
@@ -355,15 +347,7 @@ public:
     }
     return _tzCacheOff;
   }
-  void setTzOffsetMinutes(int16_t m) override {
-    NodePrefs* p = the_mesh.getNodePrefs();
-    if (!p) return;
-    if (m < -720) m = -720; else if (m > 840) m = 840;
-    p->tz_quarter_hours = (int8_t)(m / 15);
-    p->tz_city_index = -1;         // raw offset = custom
-    _tzCacheMin = 0xFFFFFFFFu;     // invalidate memo
-    the_mesh.savePrefs();
-  }
+  void setTzOffsetMinutes(int16_t m) override { applyTzOffsetMinutes(m); }
   int tzCityIndex() const override {
     return _node_prefs ? _node_prefs->tz_city_index : -1;
   }
@@ -473,14 +457,6 @@ public:
   void setGpsEnabled(bool on) override {
     if (gpsControlAllowed()) applyGpsEnabled(on);
   }
-private:
-  void applyGpsEnabled(bool on) {
-    if (!gpsSupported()) return;
-    _sensors->setSettingValue("gps", on ? "1" : "0");
-    NodePrefs* p = the_mesh.getNodePrefs();     // persist like ui-tiny does
-    if (p) { p->gps_enabled = on ? 1 : 0; the_mesh.savePrefs(); }
-  }
-public:
   bool gpsHasFix() const override {
     LocationProvider* lp = _sensors ? _sensors->getLocationProvider() : nullptr;
     return lp && gpsEnabled() && lp->isValid();
@@ -564,6 +540,19 @@ public:
   void onCallBell(const uint8_t* key, const char* name, uint32_t time) override;
 
 private:
+  void applySystemVolume(uint8_t level);
+  bool applySoundVolume(uint8_t level);
+  bool applyGpsEnabled(bool on);
+  void replyToParent(const ContactInfo& from, const char* text);
+  bool applyTzOffsetMinutes(int16_t m) {
+    NodePrefs* p = the_mesh.getNodePrefs();
+    if (!p) return false;
+    if (m < -720) m = -720; else if (m > 840) m = 840;
+    p->tz_quarter_hours = (int8_t)(m / 15);
+    p->tz_city_index = -1;         // raw offset = custom
+    _tzCacheMin = 0xFFFFFFFFu;     // invalidate memo
+    return the_mesh.savePrefs();
+  }
   // Latest room-login outcome + this-power-cycle logged-in set.
   static const int MM_MAX_LOGINS = 8;
   uint32_t _loginSeq = 0;
