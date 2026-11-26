@@ -50,6 +50,19 @@ The screenshots below show the inherited Mishmesh interface.
 
 ### Screens
 
+These captures come from the MishmeshChild firmware renderer at the Wio Tracker
+L1's 128×64 resolution, enlarged for readability.
+
+| Question replies | Incoming call |
+| --- | --- |
+| ![Dinner question with Pizza and Pasta choices](mishmesh/docs/img/child/question.png) | ![Incoming call from Dad with a bell and reply prompt](mishmesh/docs/img/child/call.png) |
+
+| Timer request | Active countdown | Timer alarm |
+| --- | --- | --- |
+| ![Please come in timer request showing five minutes](mishmesh/docs/img/child/timer-request.png) | ![Please come in timer counting down](mishmesh/docs/img/child/timer-countdown.png) | ![Please come in timer showing Time's up](mishmesh/docs/img/child/timer-done.png) |
+
+### Mishmesh interface
+
 <table>
   <tr>
     <td align="center"><img src="mishmesh/docs/img/home.png" width="240"><br><sub>Home</sub></td>
