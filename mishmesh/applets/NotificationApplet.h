@@ -34,7 +34,6 @@ public:
   const char* nameForTest() const { return _name; }
   const char* senderForTest() const { return _sender; }
   const char* previewForTest() const { return _preview; }
-  uint16_t    otherUnreadForTest() const { return _otherUnread; }
 
 private:
   AppletHost*      _host = nullptr;
@@ -44,7 +43,6 @@ private:
   bool             _question = false;
   uint32_t         _questionTime = 0;
   bool             _isChannel = false;
-  uint16_t         _otherUnread = 0;     // other chats (not _key) still unread
   uint32_t         _raisedAt = 0;        // 0 => stamp on next render (auto-dismiss base)
   char             _name[34] = {0};      // contact (DM) or channel (group) name
   char             _sender[34] = {0};    // per-message sender, for channels

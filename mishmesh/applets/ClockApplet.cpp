@@ -38,6 +38,11 @@ static void fmtCountdown(char* out, size_t cap, uint32_t ms) {
 // ---- models ----
 
 const char* ClockApplet::AlarmModel::value(int i) const {
+  if (i == Days) {
+    static char days[28];
+    formatAlarmDays(days, sizeof(days), clockService().alarmDays());
+    return days;
+  }
   if (i != Time) return nullptr;
   static char buf[12];
   LocalTime lt{};
@@ -127,6 +132,9 @@ void ClockApplet::onStart(AppletContext& ctx) {
   _alarmList.setModel(&_alarmModel);
   _alarmList.setRowHeight(14);
   _alarmList.resetSelection();   // singleton reuse: setModel skips reset on same-ptr rebind
+  _editingAlarmDays = false;
+  _alarmDaysList.setModel(&_alarmDaysModel);
+  _alarmDaysList.setRowHeight(14);
   _worldList.setModel(&_worldModel);
   _worldList.setRowHeight(14);
   _worldList.resetSelection();
@@ -280,17 +288,23 @@ int ClockApplet::renderTimer(Canvas& c, int y, int h) {
 }
 
 int ClockApplet::renderAlarm(Canvas& c, int y, int h) {
-  int listH = 2 * _alarmList.rowHeight() + 2;
-  _alarmList.draw(c, 0, y, c.width(), listH < h ? listH : h);
+  if (_editingAlarmDays) {
+    _alarmDaysList.draw(c, 0, y, c.width(), h);
+    return _alarmDaysList.needsAnimation() ? ListMenu::TICK_MS : 1000;
+  }
 
   char buf[28] = "";
   if (clockService().alarmEnabled() && _app) {
     int32_t mins = clockService().alarmMinutesAway(_app->epochSeconds(), _app->tzOffsetMinutes());
     if (mins < 0) snprintf(buf, sizeof(buf), "Clock not set");
     else if (mins == 0) snprintf(buf, sizeof(buf), "Rings now");
+    else if (mins >= 1440) snprintf(buf, sizeof(buf), "Rings in %ldd %ldh", (long)(mins / 1440), (long)((mins / 60) % 24));
     else if (mins >= 60) snprintf(buf, sizeof(buf), "Rings in %ldh %02ldm", (long)(mins / 60), (long)(mins % 60));
     else snprintf(buf, sizeof(buf), "Rings in %ldm", (long)mins);
   }
+  const int available = h - (buf[0] ? c.lineHeight(fontCaption()) : 0);
+  const int listH = _alarmModel.count() * _alarmList.rowHeight() + 2;
+  _alarmList.draw(c, 0, y, c.width(), listH < available ? listH : available);
   if (buf[0])
     c.drawText(fontCaption(), c.width() / 2, y + h - c.lineHeight(fontCaption()), buf,
                DisplayDriver::LIGHT, TextAlign::Center);
@@ -521,10 +535,10 @@ bool ClockApplet::inputEditor(InputEvent ev) {
       int h24 = e.ampmField >= 0 ? (e.vals[0] % 12) + (e.vals[e.ampmField] ? 12 : 0)
                                  : e.vals[0];
       // Saving a time is arming it: enable in the same step.
-      clockService().setAlarm((uint8_t)h24, (uint8_t)e.vals[1], true,
+      const bool saved = clockService().setAlarm((uint8_t)h24, (uint8_t)e.vals[1], true,
                               _app ? _app->epochSeconds() : 0,
                               _app ? _app->tzOffsetMinutes() : 0);
-      if (_host) _host->postToast("Alarm set");
+      if (_host) _host->postToast(saved ? "Alarm set" : "Alarm could not be saved");
     }
     e.open = false;
   } else if (ev == InputEvent::Back || ev == InputEvent::Cancel) {
@@ -543,6 +557,7 @@ bool ClockApplet::onInput(InputEvent ev) {
   }
 
   if (_editor.open) return inputEditor(ev);
+  if (_editingAlarmDays) return inputAlarmDays(ev);
   if (_pickingCity) return inputWorld(ev);
   // Setup overlay owns input; the tab strip must not steal NavLeft/NavRight from it.
   if (_tab == TAB_POMODORO && _pomoSetupOpen) return inputPomodoro(ev);
@@ -585,14 +600,39 @@ bool ClockApplet::inputAlarm(InputEvent ev) {
   if (ev == InputEvent::Select) {
     if (_alarmList.selected() == AlarmModel::Time) {
       openAlarmEditor();
+    } else if (_alarmList.selected() == AlarmModel::Days) {
+      _alarmDaysModel.days = svc.alarmDays();
+      _alarmDaysList.resetSelection();
+      _editingAlarmDays = true;
     } else {
-      svc.setAlarm(svc.alarmHour(), svc.alarmMinute(), !svc.alarmEnabled(),
+      const bool saved = svc.setAlarm(svc.alarmHour(), svc.alarmMinute(), !svc.alarmEnabled(),
                    _app ? _app->epochSeconds() : 0,
                    _app ? _app->tzOffsetMinutes() : 0);
+      if (!saved && _host) _host->postToast("Alarm could not be saved");
     }
     return true;
   }
   return false;
+}
+
+bool ClockApplet::inputAlarmDays(InputEvent ev) {
+  if (ev == InputEvent::Back || ev == InputEvent::Cancel) {
+    _editingAlarmDays = false;
+  } else if (!_alarmDaysList.onInput(ev) && ev == InputEvent::Select) {
+    const int row = _alarmDaysList.selected();
+    if (row < 7) {
+      _alarmDaysModel.days ^= 1u << ((row + 1) % 7);
+    } else if (!_alarmDaysModel.days) {
+      if (_host) _host->postToast("Select at least one day");
+    } else {
+      auto& clock = clockService();
+      _editingAlarmDays = !clock.setAlarm(clock.alarmHour(), clock.alarmMinute(), clock.alarmEnabled(),
+                                           _app ? _app->epochSeconds() : 0,
+                                           _app ? _app->tzOffsetMinutes() : 0, _alarmDaysModel.days);
+      if (_host) _host->postToast(_editingAlarmDays ? "Alarm could not be saved" : "Alarm days saved");
+    }
+  }
+  return true;
 }
 
 bool ClockApplet::inputWorld(InputEvent ev) {

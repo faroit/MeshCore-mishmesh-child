@@ -62,6 +62,7 @@ private:
   bool inputStopwatch(InputEvent ev);
   bool inputTimer(InputEvent ev);
   bool inputAlarm(InputEvent ev);
+  bool inputAlarmDays(InputEvent ev);
   bool inputWorld(InputEvent ev);
   bool inputPomodoro(InputEvent ev);
 
@@ -73,14 +74,23 @@ private:
 
   struct AlarmModel : ListModel {
     AppServices* app = nullptr;
-    enum Row : int { Time, Enabled };
-    int count() const override { return 2; }
-    const char* label(int i) const override { return i == Time ? "Time" : "Enabled"; }
+    enum Row : int { Time, Enabled, Days };
+    int count() const override { return 3; }
+    const char* label(int i) const override { return i == Time ? "Time" : i == Enabled ? "Enabled" : "Days"; }
     const char* value(int i) const override;
     bool isToggle(int i) const override { return i == Enabled; }
     bool toggleState(int) const override { return clockService().alarmEnabled(); }
   } _alarmModel;
   ListMenu _alarmList;
+  struct AlarmDaysModel : ListModel {
+    uint8_t days = ClockService::ALARM_DAILY;
+    int count() const override { return 8; }
+    const char* label(int i) const override { return i < 7 ? ALARM_DAY_NAMES[(i + 1) % 7] : "Save days"; }
+    bool isToggle(int i) const override { return i < 7; }
+    bool toggleState(int i) const override { return (days & (1u << ((i + 1) % 7))) != 0; }
+  } _alarmDaysModel;
+  ListMenu _alarmDaysList;
+  bool _editingAlarmDays = false;
 
   // Modal field editor shared by the alarm (HH:MM, or HH:MM AM/PM in 12h mode)
   // and the timer (H:MM:SS). NavLeft/NavRight move between fields, NavUp/NavDown

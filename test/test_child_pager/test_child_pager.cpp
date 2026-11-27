@@ -141,6 +141,24 @@ TEST(CallBell, QueueIsBoundedAndChannelsRejected) {
   for (int i = 0; i < 4; ++i) EXPECT_TRUE(bell.enqueue(dad, i, "Dad"));
   EXPECT_FALSE(bell.enqueue(dad, 5, "Dad"));
 }
+TEST(NotificationPreview, FitsTwoLinesAndOpensWithRightOnThePager) {
+  Messages svc;
+  FakeDisplayDriver display;
+  Canvas canvas(&display);
+  AppletContext ctx; ctx.messages = &svc;
+  TestRoot root;
+  AppletHost host(&display, ctx);
+  host.setRoot(&root);
+  NotificationApplet notification;
+  receive(svc, dad, "First line\nSecond line");
+  notification.raise(&svc, dad);
+  host.push(&notification);
+  canvas.setNow(1);
+  EXPECT_EQ(8000, notification.onRender(canvas));
+  host.dispatch(InputEvent::NavRight);
+  EXPECT_EQ(&messageThreadApplet(), host.foreground());
+}
+
 TEST(NotificationPreview, ScrollsNormalMessagesAndQuestionPromptsOnThePager) {
   Messages svc;
   FakeDisplayDriver display;

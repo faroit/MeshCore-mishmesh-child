@@ -12,6 +12,8 @@
 #include <mishmesh/applets/onboarding_logo.h>   // MeshCore + mishmesh wordmarks
 #include <mishmesh/applets/ClockAlertApplet.h>
 #include <mishmesh/core/ClockService.h>
+#include <mishmesh/core/RemoteCommands.h>
+#include <mishmesh/core/TimeFormat.h>
 #include <mishmesh/core/QuickReplyStore.h>
 #include <mishmesh/core/UiPrefs.h>
 #include <mishmesh/core/TelemetryDecode.h>
@@ -448,16 +450,34 @@ void UITask::replyToParent(const ContactInfo& from, const char* text) {
     _msgFlushAt = millis() + 8000;
 }
 
+static uint8_t parseAlarmDays(const char* text) {
+  const size_t length = strcspn(text, " \t\r\n");
+  if (!length || text[length + strspn(text + length, " \t\r\n")]) return 0;
+  using mishmesh::ClockService;
+  if (length == 5 && strncasecmp(text, "daily", length) == 0) return ClockService::ALARM_DAILY;
+  if (length == 8 && strncasecmp(text, "weekdays", length) == 0) return ClockService::ALARM_WEEKDAYS;
+  if (length == 8 && strncasecmp(text, "weekends", length) == 0) return ClockService::ALARM_WEEKENDS;
+  if (length % 4 != 3) return 0;
+
+  uint8_t days = 0;
+  for (size_t i = 0; i < length; i += 4) {
+    int day = 0;
+    while (day < 7 && strncasecmp(text + i, mishmesh::ALARM_DAY_NAMES[day], 3) != 0) ++day;
+    if (day == 7 || (i + 3 < length && text[i + 3] != ',')) return 0;
+    days |= 1u << day;
+  }
+  return days;
+}
+
 // Commands are consumed before chat storage, including when the PIN is wrong.
 bool UITask::onParentCommand(const ContactInfo& from, uint32_t timestamp, const char* text) {
-  enum Command { Child, Parent, Pin, Timezone, Preset, Name, Retry, Gps, Sound };
-  static const char* names[] = {"!child", "!parent", "!pin", "!tz", "!preset", "!name", "!retry", "!gps", "!sound"};
+  using namespace mishmesh::remote;
   static const char* levels[] = {"mute", "low", "mid", "high"};
   const size_t size = strcspn(text, " \t\r\n");
   unsigned command = 0;
-  for (; command < sizeof(names) / sizeof(names[0]); ++command)
-    if (strlen(names[command]) == size && memcmp(text, names[command], size) == 0) break;
-  if (command == sizeof(names) / sizeof(names[0])) return false;
+  for (; command < Count; ++command)
+    if (strlen(commands[command].name) == size && memcmp(text, commands[command].name, size) == 0) break;
+  if (command == Count) return false;
 
   auto& policy = the_mesh.messageAccess();
   if (!_host || !policy.contains(from.id.pub_key)) return true;
@@ -478,6 +498,9 @@ bool UITask::onParentCommand(const ContactInfo& from, uint32_t timestamp, const 
   char* end = nullptr;
   long number = 0;
   unsigned volume = 0;
+  uint8_t alarmHour = 0, alarmMinute = 0;
+  uint8_t alarmDays = 0;
+  const bool alarmDaysOnly = command == Alarm && wordLength == 4 && strncasecmp(args, "days", 4) == 0;
   bool enabled = false;
   bool valid = true;
   switch (command) {
@@ -519,10 +542,39 @@ bool UITask::onParentCommand(const ContactInfo& from, uint32_t timestamp, const 
       while (volume < sizeof(levels) / sizeof(levels[0]) && !wordIs(levels[volume])) ++volume;
       valid = volume < sizeof(levels) / sizeof(levels[0]);
       break;
+    case Alarm: {
+      const char* digits = "0123456789";
+      const char* extra = args + wordLength;
+      extra += strspn(extra, " \t");
+      if (alarmDaysOnly) {
+        alarmDays = parseAlarmDays(extra);
+        valid = alarmDays != 0;
+        break;
+      }
+      if (wordIs("off") || wordIs("status") || wordLength == 0) break;
+      valid = wordLength == 5 && args[2] == ':' &&
+              strspn(args, digits) == 2 && strspn(args + 3, digits) == 2;
+      if (valid) {
+        alarmHour = (args[0] - '0') * 10 + (args[1] - '0');
+        alarmMinute = (args[3] - '0') * 10 + (args[4] - '0');
+        valid = alarmHour < 24 && alarmMinute < 60;
+        if (valid && !oneWord) {
+          alarmDays = parseAlarmDays(extra);
+          valid = alarmDays != 0;
+        }
+      }
+      break;
+    }
+    case Time:
+      valid = wordLength == 0;
+      break;
+    case Help:
+      valid = oneWord;
+      break;
   }
   if (!valid) {
     char reply[48];
-    snprintf(reply, sizeof(reply), "Invalid arguments for %s.", names[command]);
+    snprintf(reply, sizeof(reply), "Invalid arguments for %s.", commands[command].name);
     replyToParent(from, reply);
     return true;
   }
@@ -545,7 +597,7 @@ bool UITask::onParentCommand(const ContactInfo& from, uint32_t timestamp, const 
       break;
   }
 
-  char reply[64];
+  char reply[mishmesh::MAX_TEXT + 1];
   switch (command) {
     case Child:
     case Parent:
@@ -612,6 +664,64 @@ bool UITask::onParentCommand(const ContactInfo& from, uint32_t timestamp, const 
         snprintf(reply, sizeof(reply), "Sound set to %s.", levels[volume]);
       else
         snprintf(reply, sizeof(reply), "Sound set to %s for now. Save failed.", levels[volume]);
+      break;
+    case Alarm: {
+      auto& clock = mishmesh::clockService();
+      if (wordLength != 0 && !wordIs("status")) {
+        const bool disable = wordIs("off");
+        const bool keepTime = disable || alarmDaysOnly;
+        if (!clock.setAlarm(keepTime ? clock.alarmHour() : alarmHour,
+                            keepTime ? clock.alarmMinute() : alarmMinute,
+                            alarmDaysOnly ? clock.alarmEnabled() : !disable,
+                            epochSeconds(), tzOffsetMinutes(), alarmDays ? alarmDays : clock.alarmDays())) {
+          snprintf(reply, sizeof(reply), "Alarm setting could not be saved.");
+          break;
+        }
+      }
+      char days[28];
+      mishmesh::formatAlarmDays(days, sizeof(days), clock.alarmDays());
+      snprintf(reply, sizeof(reply), "Alarm %s (%02u:%02u local, %s).",
+               clock.alarmEnabled() ? "on" : "off",
+               unsigned(clock.alarmHour()), unsigned(clock.alarmMinute()), days);
+      break;
+    }
+    case Time: {
+      const uint32_t epoch = epochSeconds();
+      if (!epoch) {
+        snprintf(reply, sizeof(reply), "Pager clock is unset.");
+        break;
+      }
+      const int16_t offset = tzOffsetMinutes();
+      const auto local = mishmesh::applyTz(epoch, offset);
+      char zone[12];
+      mishmesh::formatOffset(zone, sizeof(zone), offset);
+      snprintf(reply, sizeof(reply), "Pager time %04d-%02u-%02u %02u:%02u:%02u %s.",
+               int(local.year), unsigned(local.month), unsigned(local.day),
+               unsigned(local.hour), unsigned(local.minute), unsigned(local.second), zone);
+      break;
+    }
+    case Help:
+      if (wordLength == 0) {
+        size_t used = snprintf(reply, sizeof(reply), "Commands. Send !help <command> for usage.\n");
+        for (const auto& entry : commands) {
+          const size_t nameLength = strlen(entry.name);
+          if (used + nameLength + 1 >= sizeof(reply)) break;
+          memcpy(reply + used, entry.name, nameLength);
+          used += nameLength;
+          reply[used++] = ' ';
+        }
+        reply[used - 1] = 0;
+      } else {
+        const char* usage = "Unknown command. Send !help for the list.";
+        for (const auto& entry : commands) {
+          const char* name = args[0] == '!' ? entry.name : entry.name + 1;
+          if (wordIs(name)) {
+            usage = entry.usage;
+            break;
+          }
+        }
+        snprintf(reply, sizeof(reply), "%s", usage);
+      }
       break;
   }
   replyToParent(from, reply);

@@ -369,6 +369,32 @@ TEST(WorldClock, SouthernHemisphereSpansNewYear) {
 
 // ---- persistence ------------------------------------------------------------
 
+TEST(ClockPersist, OldDailyAlarmAndNewWeekdaySchedule) {
+  FakeStorage st;
+  st.kv["alrm"] = {1, 0, 30};
+  ClockService clock;
+  clock.begin(&st);
+  EXPECT_EQ(ClockService::ALARM_DAILY, clock.alarmDays());
+
+  // Sunday night UTC is already Monday in the pager's timezone.
+  const uint32_t sunday = utc(2026, 11, 29, 23, 0);
+  ASSERT_TRUE(clock.setAlarm(0, 30, true, sunday, 60, ClockService::ALARM_WEEKDAYS));
+  EXPECT_EQ(30, clock.alarmMinutesAway(sunday, 60));
+  EXPECT_EQ(ClockEvent::AlarmDue, clock.tick(0, sunday + 30 * 60, 60));
+  EXPECT_EQ(1440, clock.alarmMinutesAway(sunday + 30 * 60, 60));
+  const uint32_t friday = utc(2026, 12, 4, 23, 30);
+  EXPECT_EQ(ClockEvent::None, clock.tick(0, friday, 60)); // Saturday locally
+  EXPECT_EQ(2880, clock.alarmMinutesAway(friday, 60));
+
+  ClockService restarted;
+  restarted.begin(&st);
+  EXPECT_EQ(ClockService::ALARM_WEEKDAYS, restarted.alarmDays());
+  ASSERT_TRUE(restarted.setAlarm(7, 15, false, sunday, 60));
+  EXPECT_EQ(ClockService::ALARM_WEEKDAYS, restarted.alarmDays());
+  EXPECT_FALSE(restarted.setAlarm(7, 15, true, sunday, 60, 0));
+  EXPECT_FALSE(restarted.alarmEnabled());
+}
+
 TEST(ClockPersist, AlarmCitiesAndTimerDurationRoundTrip) {
   FakeStorage st;
   int berlin = cityIndex("Berlin"), tokyo = cityIndex("Tokyo");

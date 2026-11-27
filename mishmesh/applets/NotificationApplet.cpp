@@ -4,7 +4,6 @@
 #include "QuestionApplet.h"
 #include <mishmesh/core/AppletHost.h>
 #include <mishmesh/core/Canvas.h>
-#include <mishmesh/core/Metrics.h>
 #include <mishmesh/core/Question.h>
 #include <mishmesh/core/TimerRequest.h>
 #include <mishmesh/text/Fonts.h>
@@ -20,13 +19,11 @@ void NotificationApplet::raise(MessagesService* svc, const ConvoKey& key) {
   _key = key;
   _name[0] = _sender[0] = _preview[0] = 0;
   _isChannel = (key.type == 1);
-  _otherUnread = 0;
   _previewScroll.reset();
   _raisedAt = 0;   // restart the auto-dismiss timer on the next render
   if (!svc) return;
 
-  // One pass over the chat list: pull the subject's display name and, in the same
-  // loop, tally how many *other* chats are still unread (the footer's count).
+  // Find the subject's display name.
   ConvoView v;
   int n = svc->convoCount();
   for (int i = 0; i < n; i++) {
@@ -34,8 +31,7 @@ void NotificationApplet::raise(MessagesService* svc, const ConvoKey& key) {
     if (v.key.equals(key)) {
       snprintf(_name, sizeof(_name), "%s", v.name ? v.name : "");
       _isChannel = v.isChannel;
-    } else if (v.unread > 0) {
-      _otherUnread++;
+      break;
     }
   }
 
@@ -83,8 +79,7 @@ int NotificationApplet::onRender(Canvas& c) {
   const int W = card.width(), H = card.height();
   card.fillRect(0, 0, W, H, DisplayDriver::DARK);
 
-  // Inverted header band: source icon + label, with an "open" affordance at the
-  // right. For channels the label is the group name; the person is the body line.
+  // For channels the header names the group and the first body line names the sender.
   const int HDR = 13;
   card.fillRect(1, 1, W - 2, HDR - 1, DisplayDriver::LIGHT);
   int gh = card.fontHeight(iconFont());  if (gh <= 0) gh = 12;
@@ -92,8 +87,7 @@ int NotificationApplet::onRender(Canvas& c) {
   int hIcon = (uint16_t)(_isChannel ? Icon::Users : Icon::Message);
   card.drawGlyph(iconFont(), 3, 1 + (HDR - 1 - gh) / 2, (uint16_t)hIcon, DisplayDriver::DARK);
   const char* hdr = (_isChannel && _name[0]) ? _name : (_question ? "Question" : "New message");
-  card.drawTextEllipsized(fontBody(), 18, 1 + (HDR - 1 - fb) / 2, W - 18 - 8, hdr, DisplayDriver::DARK);
-  card.drawText(fontBody(), W - 4, 1 + (HDR - 1 - fb) / 2, ">", DisplayDriver::DARK, TextAlign::Right);
+  card.drawTextEllipsized(fontBody(), 18, 1 + (HDR - 1 - fb) / 2, W - 18 - 3, hdr, DisplayDriver::DARK);
 
   int lh = card.lineHeight(fontBody());  if (lh <= 0) lh = 10;
 
@@ -104,31 +98,11 @@ int NotificationApplet::onRender(Canvas& c) {
   card.drawTextEllipsized(fontBody(), 3, y, W - 6, who, DisplayDriver::LIGHT);
   y += lh;
 
-  // Footer: a dotted divider above either the unread tally or the dismiss hint.
-  const int FOOT = 12;
-  int footY = H - FOOT;
-  // The footer is caption-sized because a 64px panel has nothing to spare; a
-  // taller card can carry the body tier, which is what the rest of the card uses.
-  const mf_font_s* footFont = tierFont(c);
-  int cap = card.fontHeight(footFont); if (cap <= 0) cap = 6;
-
-  const bool scrollable = _previewScroll.draw(card, 3, y, W - 6, footY - 2 - y, _preview);
-
-  card.fillStipple(3, footY - 2, W - 6, 1, DisplayDriver::LIGHT);
-  if (scrollable) {
-    card.drawTextEllipsized(footFont, 3, footY + (FOOT - cap) / 2, W - 6,
-                            "Up/Down to scroll", DisplayDriver::LIGHT);
-  } else if (_question) {
-    card.drawTextEllipsized(footFont, 3, footY + (FOOT - cap) / 2, W - 6,
-                            "OK: answer  Back: dismiss", DisplayDriver::LIGHT);
-  } else if (_otherUnread > 0) {
-    char b[24];
-    snprintf(b, sizeof(b), "%u more unread", (unsigned)_otherUnread);
-    card.drawGlyph(iconFont(), 3, footY + (FOOT - gh) / 2, (uint16_t)Icon::Mail, DisplayDriver::LIGHT);
-    card.drawText(footFont, 16, footY + (FOOT - cap) / 2, b, DisplayDriver::LIGHT);
-  } else {
-    card.drawText(footFont, 3, footY + (FOOT - cap) / 2, "Back to dismiss", DisplayDriver::LIGHT);
-  }
+  // Leave room at the right for the open arrow and use the full body height.
+  const char* openArrow = ">";
+  const int previewWidth = W - 10 - card.textWidth(fontBody(), openArrow);
+  const bool scrollable = _previewScroll.draw(card, 3, y, previewWidth, H - 3 - y, _preview);
+  card.drawText(fontBody(), W - 4, H - 3 - fb, openArrow, DisplayDriver::LIGHT, TextAlign::Right);
 
   card.drawRoundRect(0, 0, W, H, DisplayDriver::LIGHT);   // rounded outer frame on top
 
@@ -144,7 +118,7 @@ int NotificationApplet::onRender(Canvas& c) {
 
 bool NotificationApplet::onInput(InputEvent ev) {
   if (_previewScroll.onInput(ev)) return true;
-  if (ev == InputEvent::Select || ev == InputEvent::SelectLong) {
+  if (ev == InputEvent::Select || ev == InputEvent::SelectLong || ev == InputEvent::NavRight) {
     if (_question) {
       if (_host && _svc) {
         for (int i = _svc->messageCount(_key) - 1; i >= 0; --i) {

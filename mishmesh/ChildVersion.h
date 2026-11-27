@@ -1,3 +1,3 @@
 #pragma once
 
-#define MISHMESH_CHILD_VERSION "v0.2.1"
+#define MISHMESH_CHILD_VERSION "v0.3.0"

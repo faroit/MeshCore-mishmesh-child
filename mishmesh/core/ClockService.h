@@ -5,6 +5,8 @@
 namespace mishmesh {
 
 struct AppletStorage;
+extern const char* const ALARM_DAY_NAMES[7];  // Sunday first, like LocalTime::weekday
+void formatAlarmDays(char* out, uint16_t cap, uint8_t days);
 
 // What tick() just fired; also the ringing state the alert screen displays.
 enum class ClockEvent : uint8_t { None = 0, TimerDone, AlarmDue,
@@ -71,13 +73,21 @@ public:
   void      pmToggle(uint32_t nowMs);
   void      pmReset();
 
-  // --- daily alarm ---
+  // --- recurring alarm ---
+  static constexpr uint8_t ALARM_DAILY = 0x7f;
+  static constexpr uint8_t ALARM_WEEKDAYS = 0x3e;
+  static constexpr uint8_t ALARM_WEEKENDS = 0x41;
   bool    alarmEnabled() const { return _alEnabled; }
   uint8_t alarmHour() const { return _alHour; }
   uint8_t alarmMinute() const { return _alMinute; }
-  void    setAlarm(uint8_t hour, uint8_t minute, bool enabled, uint32_t epochUtc,
-                   int16_t tzOffsetMin);       // persists; won't fire for the current minute
-  // Minutes until it next rings (0..1439), or -1 when disabled/clock unset.
+  uint8_t alarmDays() const { return _alDays; }
+  bool    setAlarm(uint8_t hour, uint8_t minute, bool enabled, uint32_t epochUtc,
+                   int16_t tzOffsetMin) {
+    return setAlarm(hour, minute, enabled, epochUtc, tzOffsetMin, _alDays);
+  }
+  bool    setAlarm(uint8_t hour, uint8_t minute, bool enabled, uint32_t epochUtc,
+                   int16_t tzOffsetMin, uint8_t days);
+  // Minutes until the next selected occurrence, or -1 when disabled/clock unset.
   int32_t alarmMinutesAway(uint32_t epochUtc, int16_t tzOffsetMin) const;
 
   // --- world clock (values index the WorldClock.h city table) ---
@@ -110,7 +120,6 @@ public:
   void resetForTest();
 
 private:
-  void persistAlarm();
   void persistCities();
   void persistPomodoro();
   uint32_t pmPhaseMs(PomoPhase p) const;
@@ -140,6 +149,7 @@ private:
 
   bool     _alEnabled = false;
   uint8_t  _alHour = 7, _alMinute = 0;
+  uint8_t  _alDays = ALARM_DAILY;
   uint32_t _alFiredStamp = 0;          // local epoch-minute last fired (once per minute)
   uint8_t  _alTone = 1;                // "Beeper" - the original alarm ring
   uint8_t  _tmTone = 0;                // "Arpeggio" - the original timer ring

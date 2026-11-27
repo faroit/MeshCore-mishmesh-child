@@ -77,12 +77,19 @@ contact.
 
 Send these commands as ordinary direct messages from the admin contact. The
 older `!parent lock` and `!parent unlock` commands also work.
+On the pager, **Apps → Help** shows the command syntax.
 
 | Command | Effect |
 | --- | --- |
+| `!help` / `!help alarm` | Lists the supported commands or shows usage for a specific command. |
 | `!child on` / `!child off` | Turns Child mode on or off. The admin contact can send this command in either mode. |
 | `!pin <old> <new>` | Changes the six-digit parent PIN. The sending app may retain both PINs in its sent history. |
 | `!tz <minutes>` | Sets a fixed UTC offset in 15-minute increments, from −720 to +840. |
+| `!time` | Reports the pager's current local date and time with its UTC offset. |
+| `!alarm HH:MM [days]` | Sets and enables the Clock alarm in the pager's local time. Use 24-hour time, for example `!alarm 07:30 weekdays`. Omit the days to keep the current schedule. |
+| `!alarm days <days>` | Changes the schedule while keeping the alarm time and whether it is enabled. |
+| `!alarm off` | Disables the alarm and keeps the saved time and days. |
+| `!alarm` or `!alarm status` | Reports whether the alarm is enabled and shows its time and days. |
 | `!preset <n> <text>` | Updates quick reply n or appends at the next available slot, up to 10. Omit the text to remove that entry and shift later entries up. |
 | `!name <name>` | Changes the remote parent's local contact name on the pager. |
 | `!retry on` / `!retry off` | Controls automatic direct message retries. |
@@ -90,6 +97,9 @@ older `!parent lock` and `!parent unlock` commands also work.
 | `!sound low\|mid\|high\|mute` | Sets system volume, including call bells and message timers. Send one level, for example `!sound low`. The child can also adjust volume locally. |
 
 The pager replies by direct message with the result of each setting command.
+Use `daily`, `weekdays` (Monday to Friday), `weekends`, or a comma-separated
+list such as `mon,wed,fri` with no spaces. On the pager, open **Clock → Alarm →
+Days**, toggle the days, then choose **Save days**.
 Replies to PIN changes never include either PIN. An allowed contact with
 Admin access off gets a setup reminder when it sends a command. If the pager reports that the
 sender's time is out of date, sync the sending radio's clock and send a fresh

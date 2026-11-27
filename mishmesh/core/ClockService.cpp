@@ -1,6 +1,7 @@
 #include <mishmesh/core/ClockService.h>
 #include <mishmesh/core/AppletStorage.h>
 #include <mishmesh/core/WorldClock.h>
+#include <stdio.h>
 
 namespace mishmesh {
 
@@ -8,10 +9,12 @@ void ClockService::begin(AppletStorage* st) {
   _st = st;
   if (!_st) return;
   uint8_t buf[1 + MAX_CITIES];
-  if (_st->load("alrm", buf, 3) == 3 && buf[1] < 24 && buf[2] < 60) {
+  const auto alarmSize = _st->load("alrm", buf, 4);
+  if (alarmSize >= 3 && buf[1] < 24 && buf[2] < 60) {
     _alEnabled = buf[0] != 0;
     _alHour = buf[1];
     _alMinute = buf[2];
+    _alDays = alarmSize == 4 && buf[3] && buf[3] <= ALARM_DAILY ? buf[3] : ALARM_DAILY;
   }
   uint8_t n = _st->load("wclk", buf, sizeof(buf));
   if (n >= 1) {
@@ -201,26 +204,63 @@ void ClockService::persistPomodoro() {
 
 // --- alarm ---
 
-void ClockService::setAlarm(uint8_t hour, uint8_t minute, bool enabled,
-                            uint32_t epochUtc, int16_t tzOffsetMin) {
-  _alHour = hour < 24 ? hour : 0;
-  _alMinute = minute < 60 ? minute : 0;
+const char* const ALARM_DAY_NAMES[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+
+void formatAlarmDays(char* out, uint16_t cap, uint8_t days) {
+  if (!cap) return;
+  if (days == ClockService::ALARM_DAILY) { snprintf(out, cap, "Daily"); return; }
+  if (days == ClockService::ALARM_WEEKDAYS) { snprintf(out, cap, "Weekdays"); return; }
+  if (days == ClockService::ALARM_WEEKENDS) { snprintf(out, cap, "Weekends"); return; }
+  out[0] = 0;
+  size_t used = 0;
+  for (int i = 1; i <= 7; ++i) {
+    const int day = i % 7;
+    if (!(days & (1u << day))) continue;
+    const int written = snprintf(out + used, cap - used, "%s%s", used ? "," : "", ALARM_DAY_NAMES[day]);
+    if (written < 0 || static_cast<size_t>(written) >= cap - used) break;
+    used += written;
+  }
+}
+
+static uint32_t alarmLocalMinute(uint32_t epochUtc, int16_t tzOffsetMin) {
+  const int64_t localSeconds = static_cast<int64_t>(epochUtc) + static_cast<int32_t>(tzOffsetMin) * 60;
+  return localSeconds > 0 ? static_cast<uint32_t>(localSeconds / 60) : 0;
+}
+
+static bool alarmRunsOn(uint8_t days, uint32_t localDay) {
+  // The Unix epoch began on Thursday.
+  return (days & (1u << ((localDay + 4) % 7))) != 0;
+}
+
+bool ClockService::setAlarm(uint8_t hour, uint8_t minute, bool enabled,
+                            uint32_t epochUtc, int16_t tzOffsetMin, uint8_t days) {
+  if (!days || days > ALARM_DAILY) return false;
+  hour = hour < 24 ? hour : 0;
+  minute = minute < 60 ? minute : 0;
+  const uint8_t setting[] = {static_cast<uint8_t>(enabled), hour, minute, days};
+  if (_st && !_st->save("alrm", setting, sizeof(setting))) return false;
+  _alHour = hour;
+  _alMinute = minute;
+  _alDays = days;
   _alEnabled = enabled;
   // Arm for the NEXT occurrence: enabling an alarm during its own minute must
   // not ring instantly, so mark the current local minute as already fired.
-  uint32_t localEpoch = epochUtc + (int32_t)tzOffsetMin * 60;
-  uint32_t localMin = localEpoch / 60;
+  const uint32_t localMin = alarmLocalMinute(epochUtc, tzOffsetMin);
   bool dueNow = (localMin % 1440) == (uint32_t)_alHour * 60 + _alMinute;
   _alFiredStamp = (enabled && epochUtc && dueNow) ? localMin : 0;
-  persistAlarm();
+  return true;
 }
 
 int32_t ClockService::alarmMinutesAway(uint32_t epochUtc, int16_t tzOffsetMin) const {
   if (!_alEnabled || epochUtc == 0) return -1;
-  uint32_t localEpoch = epochUtc + (int32_t)tzOffsetMin * 60;
-  int32_t nowMin = (int32_t)((localEpoch % 86400) / 60);
-  int32_t target = (int32_t)_alHour * 60 + _alMinute;
-  return ((target - nowMin) % 1440 + 1440) % 1440;
+  const uint32_t now = alarmLocalMinute(epochUtc, tzOffsetMin);
+  const uint32_t today = now / 1440;
+  const uint32_t target = static_cast<uint32_t>(_alHour) * 60 + _alMinute;
+  for (uint32_t day = today; day <= today + 7; ++day) {
+    const uint32_t next = day * 1440 + target;
+    if (next >= now && next != _alFiredStamp && alarmRunsOn(_alDays, day)) return next - now;
+  }
+  return -1;
 }
 
 void ClockService::setAlarmToneIdx(uint8_t i) {
@@ -241,12 +281,6 @@ void ClockService::setAlarmVolume(uint8_t v) {
 void ClockService::setTimerVolume(uint8_t v) {
   _tmVol = v <= 3 ? v : 0;
   if (_st) _st->save("tmvl", &_tmVol, 1);
-}
-
-void ClockService::persistAlarm() {
-  if (!_st) return;
-  uint8_t b[3] = { (uint8_t)(_alEnabled ? 1 : 0), _alHour, _alMinute };
-  _st->save("alrm", b, 3);
 }
 
 // --- world clock ---
@@ -308,9 +342,9 @@ ClockEvent ClockService::tick(uint32_t nowMs, uint32_t epochUtc, int16_t tzOffse
     return ClockEvent::TimerDone;
   }
   if (_alEnabled && epochUtc != 0) {
-    uint32_t localMin = (epochUtc + (int32_t)tzOffsetMin * 60) / 60;
+    const uint32_t localMin = alarmLocalMinute(epochUtc, tzOffsetMin);
     bool due = (localMin % 1440) == (uint32_t)_alHour * 60 + _alMinute;
-    if (due && _alFiredStamp != localMin) {
+    if (due && _alFiredStamp != localMin && alarmRunsOn(_alDays, localMin / 1440)) {
       _alFiredStamp = localMin;
       _ringing = ClockEvent::AlarmDue;
       return ClockEvent::AlarmDue;
@@ -326,7 +360,7 @@ void ClockService::resetForTest() {
   _pmFocusMin = 25; _pmShortMin = 5; _pmLongMin = 15; _pmSetN = 4; _pmAuto = true;
   _pmPhase = PomoPhase::Idle; _pmBlock = 0; _pmRunning = false;
   _pmRemainMs = 0; _pmPhaseTotalMs = 0;
-  _alEnabled = false; _alHour = 7; _alMinute = 0; _alFiredStamp = 0;
+  _alEnabled = false; _alHour = 7; _alMinute = 0; _alDays = ALARM_DAILY; _alFiredStamp = 0;
   _alTone = 1; _tmTone = 0; _alVol = 0; _tmVol = 0;
   _cityCount = 0;
   _ringing = ClockEvent::None;
